@@ -12,7 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Save and restore browser sessions, including cookies, local storage, and IndexedDB.
-- Check Session to load a saved session, check for the slider CAPTCHA, and continue setup or scanning in the same browser.
 - Download, check, and reinstall the selected browser from Settings.
 - Saved scans path and an Open saved scans folder button in Settings.
 

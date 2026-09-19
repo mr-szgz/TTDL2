@@ -11,7 +11,7 @@ from PySide6.QtCore import QByteArray, QProcess, QSize, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox,
-    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPlainTextEdit, QProgressBar, QPushButton, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 from playwright.sync_api import sync_playwright
@@ -193,10 +193,6 @@ class MainWindow(QMainWindow):
         form.addRow(options)
         layout.addWidget(self.inputs)
         actions = QHBoxLayout()
-        self.check_session_button = QPushButton("Chec&k Session")
-        self.check_session_button.setObjectName("checkSessionButton")
-        self.check_session_button.setToolTip("Load the saved session or open a new one, then check for CAPTCHA")
-        self.check_session_button.clicked.connect(lambda: self.start_download(check_session=True))
         self.download = QPushButton("Create &Session")
         self.download.setObjectName("downloadButton")
         self.download.clicked.connect(self.start_download)
@@ -230,7 +226,6 @@ class MainWindow(QMainWindow):
         self.stop.clicked.connect(self.stop_download)
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
-        actions.addWidget(self.check_session_button)
         actions.addWidget(self.download)
         actions.addWidget(self.save_session_button)
         actions.addWidget(self.restore_session_button)
@@ -298,31 +293,46 @@ class MainWindow(QMainWindow):
         self.config_path = QLineEdit(str(self.preferences.config_path))
         self.config_path.setReadOnly(True)
         settings_form.addRow("User config path", self.config_path)
+        config_actions = QHBoxLayout()
         open_config = QPushButton("Open config &folder")
         open_config.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(self.preferences.config_path.parent))))
-        settings_form.addRow("", open_config)
+        config_actions.addWidget(open_config)
+        config_actions.addStretch()
+        settings_form.addRow("", config_actions)
         self.state_path = QLineEdit(str(self.preferences.state_path))
         self.state_path.setReadOnly(True)
         settings_form.addRow("Saved state path", self.state_path)
         self.scan_path = QLineEdit(str(self.preferences.scan_dir))
         self.scan_path.setReadOnly(True)
         settings_form.addRow("Saved scans folder", self.scan_path)
+        scan_actions = QHBoxLayout()
         self.open_scans_button = QPushButton("Open saved scans folder")
         self.open_scans_button.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(self.preferences.scan_dir))))
-        settings_form.addRow("", self.open_scans_button)
+        scan_actions.addWidget(self.open_scans_button)
+        scan_actions.addStretch()
+        settings_form.addRow("", scan_actions)
         settings_layout.addLayout(settings_form)
+        settings_layout.addStretch()
+        settings_separator = QFrame()
+        settings_separator.setFrameShape(QFrame.Shape.HLine)
+        settings_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        settings_layout.addWidget(settings_separator)
         settings_actions = QHBoxLayout()
+        self.remember_settings = QCheckBox("&Remember settings")
+        self.remember_settings.setChecked(self.settings.remember_settings)
+        self.remember_settings.setToolTip("Automatically save settings before quitting")
+        self.remember_settings.toggled.connect(lambda checked: self.update_option("remember_settings", checked))
+        settings_actions.addWidget(self.remember_settings)
         self.save_settings_button = QPushButton("&Save Settings")
         self.save_settings_button.clicked.connect(self.save_config)
         self.restore_defaults_button = QPushButton("Restore &Defaults")
         self.restore_defaults_button.clicked.connect(self.reset_defaults)
+        settings_actions.addStretch()
         settings_actions.addWidget(self.save_settings_button)
         settings_actions.addWidget(self.restore_defaults_button)
-        settings_actions.addStretch()
         settings_layout.addLayout(settings_actions)
-        settings_layout.addStretch()
         self.browser.currentTextChanged.connect(self.check_browser)
         self.executable.textChanged.connect(self.check_browser)
         self.check_browser()
@@ -426,7 +436,7 @@ class MainWindow(QMainWindow):
 
     def update_option(self, name, checked):
         setattr(self.settings, name, checked)
-        if self.scanned_job is not None and name != "notifications":
+        if self.scanned_job is not None and name not in {"notifications", "remember_settings"}:
             setattr(self.scanned_job, name, checked)
 
     def save_config(self):
@@ -436,6 +446,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Configuration saved.")
 
     def apply_settings(self):
+        self.remember_settings.setChecked(self.settings.remember_settings)
         self.source.setText(self.settings.source)
         self.destination.setText(self.settings.folder)
         self.browser.setCurrentText(self.settings.browser)
@@ -455,17 +466,10 @@ class MainWindow(QMainWindow):
         self.apply_settings()
         self.statusBar().showMessage("Defaults restored. Click Save Settings to keep these values.")
 
-    def start_download(self, checked=False, *, restore_session=False, check_session=False):
-        if self.process.state() != QProcess.ProcessState.NotRunning and self.scanned_job.check_session:
-            self.session_setup_requested = True
-            self.download.setEnabled(False)
-            self.save_session_button.setEnabled(self.paused)
-            self.start_indexing.setEnabled(self.paused)
-            self.statusBar().showMessage("Solve the CAPTCHA in the open browser, then Save Session or Scan Profile.")
-            return
-        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
+    def start_download(self, checked=False, *, restore_session=False):
+        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications", "remember_settings"})
         self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
-                           restore_session=restore_session, check_session=check_session, **settings))
+                           restore_session=restore_session, **settings))
 
     def save_browser_session(self):
         self.save_session_button.setEnabled(False)
@@ -495,7 +499,7 @@ class MainWindow(QMainWindow):
         if path.exists():
             self.source.setText(f"https://www.tiktok.com/@{username.lstrip('@')}")
             self.scanned_links = read_links(path)
-            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
+            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications", "remember_settings"})
             self.scanned_job = Job(source=self.source.text(), folder=self.destination.text(), **settings)
             self.download_progress = None
             self.paused = self.stopping = False
@@ -510,10 +514,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"No saved scan found: {path}")
 
     def start_job(self, job, links=None):
-        self.session_setup_requested = False
         job.session_path = str(self.preferences.session_path)
         job.scan_dir = str(self.preferences.scan_dir)
-        self.save_config()
+        if self.settings.remember_settings:
+            self.save_config()
         self.status_timer.stop()
         self.download_progress = None
         self.scanning = links is None
@@ -529,7 +533,6 @@ class MainWindow(QMainWindow):
         self.log.clear()
         self.progress.setRange(0, 0)
         self.set_busy(True)
-        self.download.setEnabled(self.scanning and job.check_session)
         self.pause.setEnabled(not self.scanning)
         self.statusBar().showMessage(self.work_status)
         self.process.setProgram(str(Path(sys.executable).with_name("python.exe")))
@@ -542,7 +545,6 @@ class MainWindow(QMainWindow):
         self.inputs.setEnabled(not busy)
         self.download_videos.setEnabled(not busy and bool(self.scanned_links))
         self.download.setEnabled(not busy)
-        self.check_session_button.setEnabled(not busy)
         self.save_session_button.setEnabled(False)
         self.restore_session_button.setEnabled(not busy and self.preferences.session_path.is_file())
         self.settings_tab.setEnabled(not busy)
@@ -561,7 +563,8 @@ class MainWindow(QMainWindow):
         self.show_work_status()
 
     def begin_indexing(self):
-        self.save_config()
+        if self.settings.remember_settings:
+            self.save_config()
         self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.paused = False
@@ -628,19 +631,6 @@ class MainWindow(QMainWindow):
                 self.pause.setEnabled(False)
                 self.start_indexing.setEnabled(True)
                 self.statusBar().showMessage("Waiting for you to click Scan Profile")
-            elif event["type"] == "session_checked":
-                self.paused = True
-                self.pause.setEnabled(False)
-                if not event["challenge"]:
-                    self.download.setEnabled(False)
-                self.save_session_button.setEnabled(self.session_setup_requested and not self.stopping)
-                self.start_indexing.setEnabled((self.session_setup_requested or not event["challenge"]) and not self.stopping)
-                self.work_status = ("CAPTCHA detected. Click Create Session to complete setup in the open browser."
-                                    if event["challenge"] else "Session ready. Click Scan Profile.")
-                if self.session_setup_requested:
-                    self.work_status = "Solve the CAPTCHA in the open browser, then Save Session or Scan Profile."
-                self.log.appendPlainText(self.work_status)
-                self.statusBar().showMessage(self.work_status)
             elif event["type"] == "session_saved":
                 self.save_session_button.setEnabled(not self.stopping)
                 self.start_indexing.setEnabled(not self.stopping)
@@ -722,6 +712,11 @@ class MainWindow(QMainWindow):
                 self.stop_download()
             event.ignore()
         else:
+            if self.settings.remember_settings:
+                self.preferences.save_config(**self.settings.model_dump(exclude=set(AppState.model_fields)))
+                self.preferences.save_state(self.current_state())
+            else:
+                self.preferences.save_config(remember_settings=False)
             event.accept()
 
 

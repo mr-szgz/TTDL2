@@ -43,8 +43,6 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
         check.setChecked(True)
     assert not window.preferences.state_path.exists()
     qtbot.mouseClick(window.save_settings_button, Qt.MouseButton.LeftButton)
-    saved_config = window.preferences.config_path.read_bytes()
-    saved_state = window.preferences.state_path.read_bytes()
     restored = MainWindow(tmp_path)
     qtbot.addWidget(restored)
     restored.show()
@@ -64,12 +62,32 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     assert restored.source.text() == ""
     assert restored.size().width() == 840
     restored.close()
-    assert window.preferences.config_path.read_bytes() == saved_config
-    assert window.preferences.state_path.read_bytes() == saved_state
+    assert Settings(tmp_path).values.source == ""
+    assert Settings(tmp_path).values.browser == "chromium"
     window.reset_defaults()
     window.save_config()
     assert Settings(tmp_path).values.source == ""
     assert Settings(tmp_path).values.browser == "chromium"
+
+
+@pytest.mark.parametrize("remember", [True, False])
+def test_close_remembers_settings_when_enabled(qtbot, tmp_path, remember):
+    window = MainWindow(tmp_path)
+    qtbot.addWidget(window)
+    window.show()
+    assert window.remember_settings.isChecked()
+    window.source.setText("@saved")
+    window.save_config()
+    window.remember_settings.setChecked(remember)
+    window.source.setText("@changed")
+    window.checks["images_only"].setChecked(True)
+    window.close()
+
+    restored = MainWindow(tmp_path)
+    qtbot.addWidget(restored)
+    assert restored.remember_settings.isChecked() == remember
+    assert restored.source.text() == ("@changed" if remember else "@saved")
+    assert restored.checks["images_only"].isChecked() == remember
 
 
 def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):

@@ -26,7 +26,6 @@ class Job:
     hd_api: str = "https://www.tikwm.com/api/"
     session_path: str = ""
     restore_session: bool = False
-    check_session: bool = False
     scan_dir: str = str(CONFIG_DIR / "scans")
 
 class Control:
@@ -100,23 +99,12 @@ class Downloader:
             elif job.browser in ("chrome", "msedge"):
                 options["channel"] = job.browser
             browser = engine.launch(**options)
-            restore = Path(job.session_path).is_file() if job.check_session else job.restore_session
-            context = browser.new_context(storage_state=job.session_path if restore else None)
+            context = browser.new_context(storage_state=job.session_path if job.restore_session else None)
             page = context.new_page()
             page.goto(f"{job.site}/@{quote(username)}", wait_until="domcontentloaded", timeout=120000)
-            if job.check_session:
-                page.wait_for_load_state("load", timeout=120000)
-                page.wait_for_timeout(3000)
-                challenge = any(locator.is_visible() for frame in page.frames
-                                for locator in frame.get_by_text("Drag the slider to fit the puzzle", exact=True).all())
+            if job.manual_start:
                 self.control.pause()
-                if not challenge:
-                    context.storage_state(path=job.session_path, indexed_db=True)
-                self.emit({"type": "session_checked", "challenge": challenge})
-            if job.manual_start or job.check_session:
-                if not job.check_session:
-                    self.control.pause()
-                    self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
+                self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
                 while not self.control.ready.is_set() and not self.control.stopped.is_set():
                     if self.control.save_session.is_set():
                         self.control.save_session.clear()

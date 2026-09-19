@@ -20,6 +20,7 @@ class AppState(BaseModel):
 
 
 class AppConfig(AppState):
+    remember_settings: bool = True
     images_only: bool = False
     json_logs: bool = False
     download_logs: bool = False
