@@ -22,7 +22,7 @@ uv sync --extra test
 ## Flow
 
 1. Enter a username or profile URL and select the download folder.
-2. Click **Setup Browser**. A visible Playwright Chromium window opens.
+2. Click **Create Session**. A visible Playwright Chromium window opens.
 3. Set up the session yourself: log in, solve CAPTCHA, and display the profile.
 4. Return to the app and click **Scan Profile**. The Chromium browser minimizes
    and indexing runs in the background. There is no automatic start.
@@ -32,8 +32,14 @@ uv sync --extra test
    disabled while checked. Uncheck it to enable manual downloads after scanning.
    Downloads use the original app's TikWM HD routine. Status shows (x/y), bytes downloaded, average MB/s (1 MB = 1,000,000 bytes), and a post-based batch ETA. Transfer statistics exclude paused time.
 
-Each finished scan saves `<username>_combined_links.txt` in the selected **Save to**
-folder. To resume from that file later, enter the same profile, select that folder,
+To work through a saved list, put one profile URL per line in a text file. **Profile
+List** defaults to `ttdl2.txt` inside **Downloads Folder** and updates when that folder
+changes. You can enter a different file path. Click **Load Profile List** to select
+the first URL, then use **Next Profile** and **Prev Profile** to move through the
+list. Navigation stops at either end; loading the file again starts at the first URL.
+
+Each finished scan saves `<username>_combined_links.txt` in the selected **Downloads
+Folder**. To resume from that file later, enter the same profile, select that folder,
 and click **Restore Scan**, uncheck **Automatically download videos**, then click
 **Download Videos**. Restoring does not open a browser.
 
@@ -42,7 +48,7 @@ stylesheets or themes. There are no single-download, standard-quality or waterma
 
 **Cancel / Reset**, beside **Scan Profile**, cancels browser setup, scanning, or
 downloading immediately by terminating the worker and its browser process tree.
-It clears the session, scan results, progress, and log, and enables **Setup Browser**
+It clears the session, scan results, progress, and log, and enables **Create Session**
 again. Profile and folder inputs, saved scans, and downloaded files are preserved.
 Closing the app also cancels its active operation and closes its browser.
 

@@ -14,6 +14,63 @@ def window(qtbot, tmp_path):
     widget.show()
     return widget
 
+def test_profile_list_default_path(window, tmp_path):
+    assert window.profile_list.text() == str(Path(window.destination.text()) / "ttdl2.txt")
+    assert not window.next_profile_button.isEnabled()
+    assert not window.prev_profile_button.isEnabled()
+    window.destination.setText(str(tmp_path))
+    assert window.profile_list.text() == str(tmp_path / "ttdl2.txt")
+    assert window.profile_list.geometry().bottom() < window.load_profile_list_button.geometry().top()
+    assert window.load_profile_list_button.geometry().bottom() < window.source.geometry().top()
+
+
+@pytest.mark.parametrize("count", [1, 3])
+def test_profile_list_navigation(window, qtbot, tmp_path, count):
+    profiles = [f"https://www.tiktok.com/@profile{i}" for i in range(count)]
+    path = tmp_path / "profiles.txt"
+    path.write_text("\n\n".join(profiles) + "\n", encoding="utf-8-sig")
+    window.profile_list.setText(str(path))
+    qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == profiles[0]
+    assert not window.prev_profile_button.isEnabled()
+    assert window.next_profile_button.isEnabled() == (count > 1)
+    qtbot.mouseClick(window.prev_profile_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == profiles[0]
+    for index in range(1, count):
+        window.scanned_links = ["old scan"]
+        qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+        assert window.source.text() == profiles[index]
+        assert window.scanned_links is None
+        assert window.prev_profile_button.isEnabled()
+    assert not window.next_profile_button.isEnabled()
+    qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == profiles[-1]
+    for index in range(count - 2, -1, -1):
+        qtbot.mouseClick(window.prev_profile_button, Qt.MouseButton.LeftButton)
+        assert window.source.text() == profiles[index]
+    assert not window.prev_profile_button.isEnabled()
+
+
+def test_profile_list_reload_and_busy_state(window, qtbot, tmp_path):
+    path = tmp_path / "profiles.txt"
+    path.write_text("https://www.tiktok.com/@alice\nhttps://www.tiktok.com/@bob\n", encoding="utf-8")
+    window.profile_list.setText(str(path))
+    qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+    window.set_busy(True)
+    assert not window.profile_list.isEnabled()
+    assert not window.load_profile_list_button.isEnabled()
+    assert not window.prev_profile_button.isEnabled()
+    window.set_busy(False)
+    assert window.prev_profile_button.isEnabled()
+    assert not window.next_profile_button.isEnabled()
+    path.write_text("https://www.tiktok.com/@carol\n", encoding="utf-8")
+    qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == "https://www.tiktok.com/@carol"
+    assert not window.next_profile_button.isEnabled()
+    assert not window.prev_profile_button.isEnabled()
+
+
 def test_hd_mass_only_screen(window, qtbot):
     assert not window.findChildren(QComboBox)
     assert window.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
@@ -21,7 +78,7 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
     assert window.auto_download.geometry().top() > window.download.geometry().bottom()
     assert "Download activity" not in [label.text() for label in window.findChildren(QLabel)]
-    assert window.download.text() == "Setup &Browser"
+    assert window.download.text() == "Create &Session"
     assert window.start_indexing.isVisible()
     assert window.start_indexing.text() == "&Scan Profile"
     assert window.cancel_reset.text() == "&Cancel / Reset"
