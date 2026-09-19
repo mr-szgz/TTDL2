@@ -19,6 +19,8 @@ def test_hd_mass_download(job_factory, server):
     assert (root / "123_HD.json").exists()
     assert (root / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
     assert events[-1] == {"type": "done", "stopped": False}
+    transferred = sum(event["bytes"] for event in events if event["type"] == "transfer")
+    assert transferred == sum(path.stat().st_size for path in root.rglob("*") if path.suffix in (".mp4", ".jpg"))
     indexing = [event for event in events if event["type"] == "indexing"]
     assert indexing[0] == {"type": "indexing", "total": 1, "added": 1}
     assert indexing[-1] == {"type": "indexing", "total": 2, "added": 1}
@@ -33,6 +35,7 @@ def test_hd_mass_download(job_factory, server):
     downloader = Downloader(job, events.append, Control())
     downloader.run(downloader.scan())
     assert sum(v for k,v in server[1].items() if k.startswith("/media/")) == before
+    assert sum(event["bytes"] for event in events if event["type"] == "transfer") == transferred
 
 def test_images_only(job_factory):
     job = job_factory(images_only=True)

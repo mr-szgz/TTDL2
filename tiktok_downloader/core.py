@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import re
 import threading
+from time import monotonic
 from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright
@@ -180,11 +181,21 @@ class Downloader:
                 return False
             request = Request(asset_url, headers={"User-Agent": "TikTokDownloader2/2.0"})
             with urlopen(request, timeout=120) as response, partial.open("wb") as file:
+                pending_bytes = 0
+                last_update = monotonic()
                 while self.control.checkpoint():
                     chunk = response.read(8192)
                     if not chunk:
                         break
                     file.write(chunk)
+                    pending_bytes += len(chunk)
+                    now = monotonic()
+                    if now - last_update >= 0.25:
+                        self.emit({"type": "transfer", "bytes": pending_bytes})
+                        pending_bytes = 0
+                        last_update = now
+                if pending_bytes:
+                    self.emit({"type": "transfer", "bytes": pending_bytes})
             if self.control.stopped.is_set():
                 return False
             partial.replace(destination)

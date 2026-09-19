@@ -23,7 +23,7 @@ uv sync --extra test
    the browser, and automatically starts downloading by default.
 6. **Automatically download videos**, below the buttons, keeps **Download Videos**
    disabled while checked. Uncheck it to enable manual downloads after scanning.
-   Downloads use the original app's TikWM HD routine. Status shows (x/y), items/sec, and ETA.
+   Downloads use the original app's TikWM HD routine. Status shows (x/y), bytes downloaded, average MB/s (1 MB = 1,000,000 bytes), and a post-based batch ETA. Transfer statistics exclude paused time.
 
 Each finished scan saves `<username>_combined_links.txt` in the selected **Save to**
 folder. To resume from that file later, enter the same profile, select that folder,

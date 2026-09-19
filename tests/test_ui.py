@@ -161,8 +161,8 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     assert not window.start_indexing.isEnabled()
     assert "Indexed 1 unique posts — 1 new posts found" in statuses
     assert "Indexed 2 unique posts — 1 new posts found" in statuses
-    assert "Downloading (1/2) — 0.00 items/sec — ETA calculating…" in statuses
-    assert any(message.startswith("Downloading (2/2) — ") and "items/sec — ETA" in message for message in statuses)
+    assert "Downloading (1/2) — 0 bytes downloaded — 0.00 MB/s — ETA calculating…" in statuses
+    assert any(message.startswith("Downloading (2/2) — ") and "MB/s — ETA" in message for message in statuses)
     assert not window.status_timer.isActive()
     qtbot.wait(1100)
     assert window.statusBar().currentMessage() == "Completed"

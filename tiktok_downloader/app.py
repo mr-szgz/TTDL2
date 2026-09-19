@@ -350,6 +350,9 @@ class MainWindow(QMainWindow):
             elif event["type"] == "downloading":
                 self.work_status = f"Downloading ({event['current']}/{event['total']})"
                 self.show_work_status()
+            elif event["type"] == "transfer":
+                self.download_progress.downloaded_bytes += event["bytes"]
+                self.show_work_status()
             elif event["type"] == "progress":
                 if event["current"] == 0:
                     self.download_progress = DownloadProgress(event["total"])
