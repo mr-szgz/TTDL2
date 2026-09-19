@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.3] - 2026-09-19
+
+### Fixed
+
+- Skip unavailable media that returns HTTP 404 and continue downloading the rest of the batch.
+
 ## [3.4.2] - 2026-09-19
 
 ### Added
@@ -123,7 +129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.2...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.3...HEAD
+[3.4.3]: https://github.com/mr-szgz/ttdl2/compare/v3.4.2...v3.4.3
 [3.4.2]: https://github.com/mr-szgz/ttdl2/compare/v3.4.1...v3.4.2
 [3.4.1]: https://github.com/mr-szgz/ttdl2/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/mr-szgz/ttdl2/compare/v3.3.0...v3.4.0
