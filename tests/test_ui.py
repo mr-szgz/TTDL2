@@ -3,11 +3,11 @@ import pytest
 from PySide6.QtCore import QProcess, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel
 from tiktok_downloader.app import MainWindow, SettingsDialog
-from tiktok_downloader.settings import Settings, load_settings, save_settings
+from tiktok_downloader.settings import AppConfig, Settings
 
 @pytest.fixture
 def window(qtbot, tmp_path):
-    widget = MainWindow(tmp_path / "config.json")
+    widget = MainWindow(tmp_path)
     qtbot.addWidget(widget)
     widget.show()
     return widget
@@ -36,10 +36,10 @@ def test_native_defaults(window, qtbot):
     assert window.source.hasFocus()
 
 def test_settings(window, tmp_path):
-    settings = Settings(str(tmp_path), True, True, True, True, "chromium", "")
-    path = tmp_path / "settings.json"
-    save_settings(settings, path)
-    assert load_settings(path) == settings
+    settings = AppConfig(folder=str(tmp_path), images_only=True, json_logs=True, download_logs=True, notifications=True)
+    path = tmp_path / "config.json"
+    settings.save(path)
+    assert Settings(tmp_path).values == settings
     assert SettingsDialog(settings, window).settings() == settings
 
 def test_open_browser_click_uses_hd_mass_job(window, qtbot, monkeypatch, tmp_path):

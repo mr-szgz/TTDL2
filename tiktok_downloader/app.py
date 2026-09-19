@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QProcess, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QProcess, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from .core import Job, filename_component, profile_name, read_links
 from . import __version__
 from .progress import DownloadProgress
-from .settings import Settings, load_settings, save_settings, settings_path
+from .settings import AppConfig, AppState, CONFIG_DIR, Settings
 
 
 class SettingsDialog(QDialog):
@@ -23,8 +23,18 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Settings")
         self.setMinimumWidth(460)
-        self.folder = settings.folder
+        self.values = settings
         layout = QFormLayout(self)
+        self.config_path = QLineEdit(str(parent.preferences.config_path))
+        self.config_path.setReadOnly(True)
+        layout.addRow("User config path", self.config_path)
+        self.state_path = QLineEdit(str(parent.preferences.state_path))
+        self.state_path.setReadOnly(True)
+        layout.addRow("Saved state path", self.state_path)
+        open_config = QPushButton("Open config &folder")
+        open_config.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(parent.preferences.config_path.parent))))
+        layout.addRow(open_config)
         self.browser = QComboBox()
         self.browser.addItems(["system", "chromium", "chrome", "msedge", "firefox"])
         self.browser.setCurrentText(settings.browser)
@@ -45,16 +55,17 @@ class SettingsDialog(QDialog):
         layout.addRow(buttons)
 
     def settings(self):
-        return Settings(folder=self.folder, browser=self.browser.currentText(),
-                        executable=self.executable.text(),
-                        **{name: check.isChecked() for name, check in self.checks.items()})
+        return AppConfig.model_validate(self.values.model_dump() | {
+            "browser": self.browser.currentText(), "executable": self.executable.text(),
+            **{name: check.isChecked() for name, check in self.checks.items()},
+        })
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, config_path=None):
+    def __init__(self, config_dir=None):
         super().__init__()
-        self.config_path = config_path if config_path is not None else settings_path()
-        self.settings = load_settings(self.config_path)
+        self.preferences = Settings(config_dir if config_dir is not None else CONFIG_DIR)
+        self.settings = self.preferences.values
         self.process = QProcess(self)
         self.stderr_decoder = codecs.getincrementaldecoder("utf-8")()
         self.process.readyReadStandardOutput.connect(self.read_events)
@@ -75,22 +86,28 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("TikTok Downloader 2")
         self.resize(840, 660)
         self.setMinimumSize(500, 480)
+        if self.settings.window_geometry:
+            self.restoreGeometry(QByteArray.fromHex(self.settings.window_geometry.encode("ascii")))
         body = QWidget()
         self.setCentralWidget(body)
         layout = QVBoxLayout(body)
         layout.setContentsMargins(24, 20, 24, 20)
         layout.setSpacing(12)
         title = QLabel("TikTok Downloader 2")
+        title_font = title.font()
+        title_font.setPointSize(20)
+        title_font.setBold(True)
+        title.setFont(title_font)
         layout.addWidget(title)
-        layout.addWidget(QLabel("HD mass download"))
-        instructions = QLabel("Set up the browser session, click Scan Profile, then Download Videos when the scan finishes.")
+        instructions = QLabel("Set up the browser session and click Scan Profile.\n"
+                             "When scanning finishes, click Download Videos for HD media.")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
         self.inputs = QWidget()
         form = QFormLayout(self.inputs)
         form.setContentsMargins(0, 8, 0, 8)
         source_row = QHBoxLayout()
-        self.source = QLineEdit()
+        self.source = QLineEdit(self.settings.source)
         self.source.setObjectName("source")
         self.source.setAccessibleName("TikTok username or profile URL")
         self.source.setPlaceholderText("@username or TikTok profile URL")
@@ -153,6 +170,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("Ready")
         menu = self.menuBar().addMenu("&File")
         self.settings_action = menu.addAction("&Settings…", self.edit_settings)
+        self.save_config_action = menu.addAction("&Save config", self.save_config)
+        self.reset_action = menu.addAction("Restore &Defaults", self.reset_defaults)
         self.import_action = menu.addAction("&Import settings…", self.import_settings)
         menu.addAction("&Export settings…", self.export_settings)
         menu.addSeparator()
@@ -168,31 +187,53 @@ class MainWindow(QMainWindow):
         dialog = SettingsDialog(self.settings, self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.settings = dialog.settings()
-            self.settings.folder = self.destination.text()
-            save_settings(self.settings, self.config_path)
+            self.preferences.save_config(**self.settings.model_dump(exclude=set(AppState.model_fields)))
+            self.settings = self.preferences.values
+
+    def current_state(self):
+        return AppState(source=self.source.text(), folder=self.destination.text(),
+                        window_geometry=bytes(self.saveGeometry().toHex()).decode("ascii"))
+
+    def save_config(self):
+        self.preferences.save_config(**self.settings.model_dump(exclude=set(AppState.model_fields)))
+        self.preferences.save_state(self.current_state())
+        self.settings = self.preferences.values
+        self.statusBar().showMessage("Configuration saved.")
+
+    def apply_settings(self):
+        self.source.setText(self.settings.source)
+        self.destination.setText(self.settings.folder)
+        if self.settings.window_geometry:
+            self.restoreGeometry(QByteArray.fromHex(self.settings.window_geometry.encode("ascii")))
+        else:
+            self.showNormal()
+            self.resize(840, 660)
+        self.clear_scan()
+
+    def reset_defaults(self):
+        self.preferences.reset_state()
+        self.settings = self.preferences.values
+        self.apply_settings()
+        self.statusBar().showMessage("Defaults restored. Click Save config to keep these values.")
 
     def import_settings(self):
         path, _ = QFileDialog.getOpenFileName(self, "Import settings", "", "JSON (*.json)")
         if path:
-            self.settings = Settings(**json.loads(Path(path).read_text(encoding="utf-8")))
-            save_settings(self.settings, self.config_path)
-            self.destination.setText(self.settings.folder)
+            self.settings = AppConfig.model_validate_json(Path(path).read_text(encoding="utf-8"))
+            self.apply_settings()
+            self.save_config()
 
     def export_settings(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export settings", "settings.json", "JSON (*.json)")
         if path:
-            self.settings.folder = self.destination.text()
-            save_settings(self.settings, Path(path))
+            AppConfig.model_validate(self.settings.model_dump() | self.current_state().model_dump()).save(Path(path))
 
     def about(self):
         QMessageBox.about(self, "About TikTok Downloader 2", f"TikTok Downloader {__version__}\nPython · PySide6 · Playwright\n\nBased on TikTok Downloader\n© 2024 Jettcodey · MIT License")
 
     def start_download(self):
-        self.settings.folder = self.destination.text()
-        save_settings(self.settings, self.config_path)
-        settings = asdict(self.settings)
-        del settings["notifications"]
-        self.start_job(Job(source=self.source.text(), **settings))
+        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
+        self.start_job(Job(source=self.source.text(), folder=self.destination.text(), **settings))
 
     def clear_scan(self):
         self.scanned_links = None
@@ -204,11 +245,8 @@ class MainWindow(QMainWindow):
         path = Path(self.destination.text()) / f"{username}_combined_links.txt"
         if path.exists():
             self.scanned_links = read_links(path)
-            self.settings.folder = self.destination.text()
-            save_settings(self.settings, self.config_path)
-            settings = asdict(self.settings)
-            del settings["notifications"]
-            self.scanned_job = Job(source=self.source.text(), **settings)
+            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
+            self.scanned_job = Job(source=self.source.text(), folder=self.destination.text(), **settings)
             self.download_progress = None
             self.paused = self.stopping = False
             self.progress.setRange(0, max(len(self.scanned_links), 1))
@@ -249,6 +287,7 @@ class MainWindow(QMainWindow):
         self.download.setEnabled(not busy)
         self.settings_action.setEnabled(not busy)
         self.import_action.setEnabled(not busy)
+        self.reset_action.setEnabled(not busy)
         self.pause.setEnabled(busy)
         self.stop.setEnabled(busy)
 
@@ -350,8 +389,6 @@ class MainWindow(QMainWindow):
             self.stop_download()
             event.ignore()
         else:
-            self.settings.folder = self.destination.text()
-            save_settings(self.settings, self.config_path)
             event.accept()
 
 

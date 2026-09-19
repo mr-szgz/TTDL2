@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QApplication
 from tiktok_downloader.app import MainWindow
 
 app = QApplication([])
-window = MainWindow(Path(tempfile.mkdtemp()) / "settings.json")
+window = MainWindow(Path(tempfile.mkdtemp()))
 output = Path("output") / "screenshots"
 output.mkdir(parents=True, exist_ok=True)
 window.show()
