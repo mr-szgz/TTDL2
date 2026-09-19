@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QMenuBar
+from PySide6.QtWidgets import QDialog, QGroupBox, QMenuBar
 
 from tiktok_downloader.app import MainWindow
 from tiktok_downloader.settings import AppConfig, AppState, Settings
@@ -133,6 +133,19 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     assert window.preferences.scan_dir.is_dir()
     assert window.preferences.index_dir == tmp_path / "indexes"
     assert window.preferences.index_dir.is_dir()
+    settings_layout = window.settings_tab.widget().layout()
+    browser_group = settings_layout.itemAt(1).widget()
+    downloads_group = next(group for group in window.settings_tab.findChildren(QGroupBox)
+                           if group.title() == "Scanning && Downloads")
+    assert settings_layout.itemAt(0).layout().labelForField(window.config_path).text() == "User config path"
+    assert browser_group.title() == "Browser"
+    assert browser_group.isAncestorOf(window.browser)
+    assert browser_group.isAncestorOf(window.executable)
+    assert browser_group.isAncestorOf(window.session_path)
+    assert downloads_group.isAncestorOf(window.scan_path)
+    assert downloads_group.isAncestorOf(window.open_scans_button)
+    assert window.download_tab.isAncestorOf(window.remember_settings)
+    assert not window.settings_tab.isAncestorOf(window.remember_settings)
     window.checks["notifications"].setChecked(True)
     window.tabs.setCurrentWidget(window.settings_tab)
     qtbot.waitUntil(window.browser.isVisible)

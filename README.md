@@ -4,7 +4,7 @@
 
 <h1>TikTok Downloader 2</h1>
 
-Desktop-chromium based application to mass download TikTok profile videos and photos.
+Desktop-chromium based application to mass download profile videos and photos.
 </p>
 <p>
 <img src="demo.png" alt="TTDL 2" style="max-width: 960px; height: auto;">

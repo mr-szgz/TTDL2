@@ -218,8 +218,9 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.source.mapTo(window, window.source.rect().bottomLeft()).y() < window.profile_scans.mapTo(window, window.profile_scans.rect().topLeft()).y()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
-    assert window.download_tab.findChildren(QCheckBox) == [window.checks["images_only"], window.checks["notifications"], window.auto_download]
-    assert window.settings_tab.findChildren(QCheckBox) == [window.remember_settings, window.checks["json_logs"], window.checks["download_logs"]]
+    assert window.download_tab.findChildren(QCheckBox) == [window.checks["images_only"], window.checks["notifications"],
+                                                           window.auto_download, window.remember_settings]
+    assert window.settings_tab.findChildren(QCheckBox) == [window.checks["json_logs"], window.checks["download_logs"]]
     assert window.scan_delay.parentWidget().title() == "Scan Profiles"
     assert window.open_profile_downloads_button.text() == "Open profile downloads"
     assert window.auto_download.isChecked()
