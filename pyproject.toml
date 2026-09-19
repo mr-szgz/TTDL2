@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ttdl2"
-version = "3.1.0"
+version = "3.2.0"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

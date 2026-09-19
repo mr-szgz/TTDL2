@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.0] - 2026-09-19
+
+### Added
+
+- Automatically save settings before quitting, controlled by a default-checked **Remember settings** checkbox. The choice persists across launches; **Save Settings** remains available for explicit saves.
+- Profile list opening, username filtering, natural sorting, and Next/Prev navigation controls.
+- Indexing metrics showing new posts, scan time, delay, and total time.
+
+### Changed
+
+- Separate **Stop** from **Reset session** so stopping preserves progress and logs until explicitly reset.
+- Simplify the downloads folder label and remove the Check Session workflow.
+
 ## [3.1.0] - 2026-09-19
 
 ### Added
@@ -59,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.1.0...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.2.0...HEAD
+[3.2.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.2.0
 [3.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.1.0
 [3.0.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.0.0
 [2.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v2.1.0
