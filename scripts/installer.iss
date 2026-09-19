@@ -28,11 +28,12 @@ Source: "..\build\bootstrap\uv\uv.exe"; DestDir: "{app}\tools"; Flags: ignorever
 Source: "..\build\bootstrap\LICENSE-*"; DestDir: "{app}\tools\licenses"; Flags: ignoreversion
 Source: "..\tiktok_downloader\*.py"; DestDir: "{app}\app\tiktok_downloader"; Flags: ignoreversion
 Source: "..\assets\purple\ttdl2-icon-purple.ico"; DestDir: "{app}\app\assets\purple"; Flags: ignoreversion
+Source: "..\assets\purple\ttdl2-icon-purple.png"; DestDir: "{app}\app\assets\purple"; Flags: ignoreversion
 Source: "..\pyproject.toml"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\uv.lock"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}\app"; Flags: ignoreversion
-Source: "install-runtime.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "install-runtime.cmd"; DestDir: "{app}"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -72,8 +73,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     WizardForm.StatusLabel.Caption := 'Installing Python, dependencies, and Chromium...';
-    ExecAndLogOutput('pwsh.exe',
-      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-runtime.ps1') + '"',
+    ExecAndLogOutput(ExpandConstant('{cmd}'),
+      '/D /C ""' + ExpandConstant('{app}\install-runtime.cmd') + '""',
       ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, DependencyExitCode, @DependencyOutput);
     Log('Dependency setup exit code: ' + IntToStr(DependencyExitCode));
   end;

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-09-19
+
+### Fixed
+
+- Create the installer's private Python environment and install Chromium using Windows' built-in command processor, removing the unbundled PowerShell 7 requirement.
+- Include the PNG icon required to build the installed application package.
+
 ## [3.2.1] - 2026-09-19
 
 ### Changed
@@ -78,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.2.1...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.3.0...HEAD
+[3.3.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.3.0
 [3.2.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.2.0
 [3.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.1.0
 [3.0.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.0.0
