@@ -14,9 +14,12 @@ def window(qtbot, tmp_path):
 
 def test_hd_mass_only_screen(window, qtbot):
     assert not window.findChildren(QComboBox)
-    assert not window.findChildren(QCheckBox)
+    assert window.findChildren(QCheckBox) == [window.auto_download]
+    assert window.auto_download.isChecked()
+    assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
+    assert window.auto_download.geometry().top() > window.download.geometry().bottom()
     assert "Download activity" not in [label.text() for label in window.findChildren(QLabel)]
-    assert window.download.text() == "Open &browser"
+    assert window.download.text() == "Setup &Browser"
     assert window.start_indexing.isVisible()
     assert window.start_indexing.text() == "&Scan Profile"
     assert window.download_videos.text() == "&Download Videos"
@@ -24,6 +27,44 @@ def test_hd_mass_only_screen(window, qtbot):
     assert not window.start_indexing.isEnabled()
     qtbot.keyClicks(window.source, "@alice")
     assert window.source.text() == "@alice"
+
+def test_automatic_download_toggle_respects_scan_and_busy_state(window):
+    window.auto_download.setChecked(False)
+    assert not window.download_videos.isEnabled()
+    window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    window.auto_download.setChecked(True)
+    assert not window.download_videos.isEnabled()
+    window.auto_download.setChecked(False)
+    assert window.download_videos.isEnabled()
+    window.auto_download.setChecked(True)
+    window.set_busy(True)
+    window.auto_download.setChecked(False)
+    assert not window.download_videos.isEnabled()
+    window.set_busy(False)
+    window.auto_download.setChecked(True)
+    window.auto_download.setChecked(False)
+    assert window.download_videos.isEnabled()
+    window.source.setText("@another")
+    assert not window.download_videos.isEnabled()
+
+
+@pytest.mark.parametrize("code, status, completed, stopped", [
+    (1, QProcess.ExitStatus.NormalExit, True, False),
+    (0, QProcess.ExitStatus.CrashExit, True, False),
+    (0, QProcess.ExitStatus.NormalExit, False, False),
+    (0, QProcess.ExitStatus.NormalExit, True, True),
+])
+def test_unsuccessful_scan_does_not_auto_download(window, monkeypatch, code, status, completed, stopped):
+    jobs = []
+    monkeypatch.setattr(window, "start_job", lambda *args: jobs.append(args))
+    window.scanning = True
+    window.completed = completed
+    window.stopping = stopped
+    window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    window.process_finished(code, status)
+    assert jobs == []
+    assert not window.download_videos.isEnabled()
+
 
 def test_native_defaults(window, qtbot):
     from PySide6.QtWidgets import QApplication
@@ -79,7 +120,9 @@ def test_indexing_events_without_page(window, monkeypatch):
     assert window.completed
 
 
-def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory, server):
+@pytest.mark.parametrize("automatic", [True, False])
+def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory, server, automatic):
+    window.auto_download.setChecked(automatic)
     statuses = []
     window.statusBar().messageChanged.connect(statuses.append)
     job = job_factory(manual_start=True, headless=False)
@@ -93,18 +136,21 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     assert not window.download_videos.isEnabled()
     qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
-    assert window.statusBar().currentMessage() == "Scan complete — 2 total results. Click Download Videos."
-    assert window.download_videos.isEnabled()
-    qtbot.wait(500)
-    assert server[1]["/api/hd"] == 0
-    assert not list(Path(job.folder).rglob("*.mp4"))
+    if not automatic:
+        assert window.statusBar().currentMessage() == "Scan complete — 2 total results. Click Download Videos."
+        assert window.download_videos.isEnabled()
+        qtbot.wait(500)
+        assert server[1]["/api/hd"] == 0
+        assert not list(Path(job.folder).rglob("*.mp4"))
     assert (Path(job.folder) / "alice_combined_links.txt").read_text().splitlines() == window.scanned_links
     assert not window.status_timer.isActive()
     browser_visits = server[1]["/@alice"]
-    qtbot.mouseClick(window.download_videos, Qt.MouseButton.LeftButton)
-    assert not window.download_videos.isEnabled()
-    assert window.pause.isEnabled()
-    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+    if not automatic:
+        qtbot.mouseClick(window.download_videos, Qt.MouseButton.LeftButton)
+        assert not window.download_videos.isEnabled()
+        assert window.pause.isEnabled()
+        qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+    assert window.download_videos.isEnabled() == (not automatic)
     assert server[1]["/@alice"] == browser_visits
     assert window.statusBar().currentMessage() == "Completed"
     window.source.setText("@another")
@@ -137,6 +183,7 @@ def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
     assert existing.read_text() == "previously collected URLs"
 
 def test_worker_traceback(window, qtbot, job_factory, server):
+    window.auto_download.setChecked(False)
     window.start_job(job_factory(hd_api=server[0] + "/unavailable"))
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     assert server[1]["/unavailable"] == 0
@@ -150,6 +197,7 @@ def test_worker_traceback(window, qtbot, job_factory, server):
 
 @pytest.mark.parametrize("source", ["@alice", "https://www.tiktok.com/@alice/?lang=en"])
 def test_restore_scan_then_download(window, qtbot, tmp_path, server, source):
+    window.auto_download.setChecked(False)
     folder = tmp_path / "media"
     folder.mkdir()
     links = [server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
@@ -176,6 +224,7 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source):
 
 
 def test_restore_missing_scan_disables_download(window, qtbot, tmp_path):
+    window.auto_download.setChecked(False)
     window.source.setText("@alice")
     window.destination.setText(str(tmp_path))
     path = tmp_path / "alice_combined_links.txt"

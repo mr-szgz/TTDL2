@@ -15,18 +15,20 @@ uv sync --extra test
 ## Flow
 
 1. Enter a username or profile URL and select the download folder.
-2. Click **Open browser**. A visible Playwright Chromium window opens.
+2. Click **Setup Browser**. A visible Playwright Chromium window opens.
 3. Set up the session yourself: log in, solve CAPTCHA, and display the profile.
 4. Return to the app and click **Scan Profile**. The Chromium browser minimizes
    and indexing runs in the background. There is no automatic start.
 5. The app scrolls, collects video/photo URLs, saves the combined-links file, closes
-   the browser, and enables **Download Videos**. Scanning does not download media.
-6. Click **Download Videos** to download the scanned URLs through the original
-   app's TikWM HD routine. Status shows (x/y), items/sec, and ETA.
+   the browser, and automatically starts downloading by default.
+6. **Automatically download videos**, below the buttons, keeps **Download Videos**
+   disabled while checked. Uncheck it to enable manual downloads after scanning.
+   Downloads use the original app's TikWM HD routine. Status shows (x/y), items/sec, and ETA.
 
 Each finished scan saves `<username>_combined_links.txt` in the selected **Save to**
 folder. To resume from that file later, enter the same profile, select that folder,
-and click **Restore Scan**, then **Download Videos**. Restoring does not open a browser.
+and click **Restore Scan**, uncheck **Automatically download videos**, then click
+**Download Videos**. Restoring does not open a browser.
 
 The app uses native Qt widgets, fonts, colors and appearance. There are no custom
 stylesheets or themes. There are no single-download, standard-quality or watermark modes.

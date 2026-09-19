@@ -99,8 +99,8 @@ class MainWindow(QMainWindow):
         title_font.setBold(True)
         title.setFont(title_font)
         layout.addWidget(title)
-        instructions = QLabel("Set up the browser session and click Scan Profile.\n"
-                             "When scanning finishes, click Download Videos for HD media.")
+        instructions = QLabel("Click Setup Browser to set up the browser session, then click Scan Profile.\n"
+                             "HD media downloads automatically after scanning. Uncheck Automatically download videos to download manually.")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
         self.inputs = QWidget()
@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         form.addRow(destination_label, destination_row)
         layout.addWidget(self.inputs)
         actions = QHBoxLayout()
-        self.download = QPushButton("Open &browser")
+        self.download = QPushButton("Setup &Browser")
         self.download.setObjectName("downloadButton")
         self.download.clicked.connect(self.start_download)
         self.start_indexing = QPushButton("&Scan Profile")
@@ -159,6 +159,11 @@ class MainWindow(QMainWindow):
         open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.destination.text())))
         actions.addWidget(open_folder)
         layout.addLayout(actions)
+        self.auto_download = QCheckBox("&Automatically download videos")
+        self.auto_download.setChecked(True)
+        self.auto_download.toggled.connect(lambda checked: self.download_videos.setEnabled(
+            not checked and bool(self.scanned_links) and self.download.isEnabled()))
+        layout.addWidget(self.auto_download)
         self.progress = QProgressBar()
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
@@ -255,7 +260,7 @@ class MainWindow(QMainWindow):
             self.work_status = f"Scan restored — {len(self.scanned_links)} total results."
             self.log.appendPlainText(f"{self.work_status} Loaded {path}")
             self.statusBar().showMessage(self.work_status)
-            self.download_videos.setEnabled(bool(self.scanned_links))
+            self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
         else:
             self.statusBar().showMessage(f"No saved scan found: {path}")
 
@@ -379,12 +384,15 @@ class MainWindow(QMainWindow):
             if self.stopping:
                 self.statusBar().showMessage("Stopped")
             elif self.scanning:
+                if self.auto_download.isChecked():
+                    self.start_job(self.scanned_job, self.scanned_links)
+                    return
                 self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} total results. Click Download Videos.")
             else:
                 self.statusBar().showMessage("Completed")
             if self.settings.notifications and not self.stopping:
                 QApplication.alert(self)
-        self.download_videos.setEnabled(bool(self.scanned_links))
+        self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
 
     def closeEvent(self, event):
         if self.process.state() != QProcess.ProcessState.NotRunning:
