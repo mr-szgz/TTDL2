@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -105,3 +106,60 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     window.tabs.setCurrentWidget(window.settings_tab)
     assert window.browser.isEnabled()
     assert window.save_settings_button.isEnabled()
+
+
+def test_browser_status_refreshes_from_disk(qtbot, tmp_path, monkeypatch):
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "browsers"))
+    window = MainWindow(tmp_path)
+    qtbot.addWidget(window)
+    window.show()
+    window.tabs.setCurrentWidget(window.settings_tab)
+    assert window.browser_status.text() == "Browser not installed"
+    executable = Path(window.browser_status.toolTip())
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    qtbot.mouseClick(window.check_browser_button, Qt.MouseButton.LeftButton)
+    assert window.browser_status.text() == "Browser installed"
+    executable.unlink()
+    qtbot.mouseClick(window.check_browser_button, Qt.MouseButton.LeftButton)
+    assert window.browser_status.text() == "Browser not installed"
+    window.executable.setText(str(tmp_path / "custom.exe"))
+    assert not window.download_browser_button.isEnabled()
+    assert not window.reinstall_browser_button.isEnabled()
+    assert window.check_browser_button.isEnabled()
+    (tmp_path / "custom.exe").touch()
+    qtbot.mouseClick(window.check_browser_button, Qt.MouseButton.LeftButton)
+    assert window.browser_status.text().startswith("Browser installed")
+    window.executable.clear()
+    assert window.download_browser_button.isEnabled()
+
+
+@pytest.mark.parametrize("force", [False, True])
+def test_browser_install_process_refreshes_status(qtbot, tmp_path, monkeypatch, force):
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(tmp_path / "browsers"))
+    window = MainWindow(tmp_path)
+    qtbot.addWidget(window)
+    window.show()
+    window.tabs.setCurrentWidget(window.settings_tab)
+    executable = Path(window.browser_status.toolTip())
+    arguments = []
+    set_arguments = window.browser_install_process.setArguments
+
+    def local_installer(values):
+        arguments.extend(values)
+        set_arguments(["-c", "from pathlib import Path; "
+                       f"p = Path({str(executable)!r}); "
+                       "p.parent.mkdir(parents=True, exist_ok=True); p.touch()"])
+
+    monkeypatch.setattr(window.browser_install_process, "setArguments", local_installer)
+    button = window.reinstall_browser_button if force else window.download_browser_button
+    qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
+    assert not window.check_browser_button.isEnabled()
+    assert not window.download.isEnabled()
+    assert not window.cancel_reset.isEnabled()
+    assert arguments == ["-m", "playwright", "install", "chromium"] + (["--force"] if force else [])
+    qtbot.waitUntil(lambda: window.check_browser_button.isEnabled(), timeout=10000)
+    assert window.browser_status.text() == "Browser installed"
+    assert window.download.isEnabled()
+    assert window.cancel_reset.isEnabled()
+    assert window.statusBar().currentMessage() == "Browser installer exited with code 0"

@@ -1,4 +1,4 @@
-from playwright.sync_api import Browser, CDPSession
+from playwright.sync_api import Browser, CDPSession, Page
 
 from tiktok_downloader.core import Control, Downloader
 
@@ -43,3 +43,58 @@ def test_start_minimizes_real_browser_and_closes_before_downloads(job_factory, s
     assert closed == [True]
     assert server[1]["/indexing"] > 0
     assert server[1]["/api/hd"] == 2
+
+
+def test_save_and_restore_browser_storage(job_factory, tmp_path, monkeypatch):
+    session_path = tmp_path / "browser-session.json"
+    goto = Page.goto
+    restored = []
+
+    def visit(page, url, **kwargs):
+        result = goto(page, url, **kwargs)
+        if session_path.exists():
+            restored.append(page.evaluate("""async () => {
+                const db = await new Promise(resolve => {
+                    const request = indexedDB.open('auth');
+                    request.onsuccess = () => resolve(request.result);
+                });
+                const token = await new Promise(resolve => {
+                    const request = db.transaction('tokens').objectStore('tokens').get('login');
+                    request.onsuccess = () => resolve(request.result);
+                });
+                db.close();
+                return [document.cookie, localStorage.getItem('login'), token];
+            }"""))
+        else:
+            page.evaluate("""async () => {
+                document.cookie = 'session=secret; path=/';
+                localStorage.setItem('login', 'saved-user');
+                const db = await new Promise(resolve => {
+                    const request = indexedDB.open('auth', 1);
+                    request.onupgradeneeded = () => request.result.createObjectStore('tokens');
+                    request.onsuccess = () => resolve(request.result);
+                });
+                await new Promise(resolve => {
+                    const transaction = db.transaction('tokens', 'readwrite');
+                    transaction.objectStore('tokens').put('saved-token', 'login');
+                    transaction.oncomplete = resolve;
+                });
+                db.close();
+            }""")
+        return result
+
+    monkeypatch.setattr(Page, "goto", visit)
+    control = Control()
+
+    def save(event):
+        if event["type"] == "manual":
+            control.save_session.set()
+        elif event["type"] == "session_saved":
+            assert session_path.is_file()
+            control.stop()
+
+    Downloader(job_factory(manual_start=True, session_path=str(session_path)), save, control).scan()
+    assert session_path.is_file()
+    Downloader(job_factory(restore_session=True, session_path=str(session_path)),
+               lambda event: None, Control()).scan()
+    assert restored == [["session=secret", "saved-user", "saved-token"]]

@@ -24,6 +24,33 @@ def test_profile_list_default_path(window, tmp_path):
     assert window.load_profile_list_button.geometry().bottom() < window.source.geometry().top()
 
 
+def test_save_session_and_restore_after_restart(window, qtbot, job_factory, tmp_path, monkeypatch):
+    assert not window.save_session_button.isEnabled()
+    assert not window.restore_session_button.isEnabled()
+    window.start_job(job_factory(manual_start=True))
+    qtbot.waitUntil(lambda: window.save_session_button.isEnabled(), timeout=30000)
+    qtbot.mouseClick(window.save_session_button, Qt.MouseButton.LeftButton)
+    assert not window.start_indexing.isEnabled()
+    qtbot.waitUntil(lambda: window.save_session_button.isEnabled(), timeout=10000)
+    path = tmp_path / "browser-session.json"
+    assert "cookies" in json.loads(path.read_text())
+    assert window.start_indexing.isEnabled()
+    assert not window.restore_session_button.isEnabled()
+    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: not window.resetting, timeout=5000)
+    assert window.restore_session_button.isEnabled()
+    reopened = MainWindow(tmp_path)
+    qtbot.addWidget(reopened)
+    reopened.show()
+    assert reopened.restore_session_button.isEnabled()
+    jobs = []
+    monkeypatch.setattr(reopened, "start_job", lambda job: jobs.append(job))
+    qtbot.mouseClick(reopened.restore_session_button, Qt.MouseButton.LeftButton)
+    assert jobs[-1].restore_session
+    qtbot.mouseClick(reopened.download, Qt.MouseButton.LeftButton)
+    assert not jobs[-1].restore_session
+
+
 @pytest.mark.parametrize("count", [1, 3])
 def test_profile_list_navigation(window, qtbot, tmp_path, count):
     profiles = [f"https://www.tiktok.com/@profile{i}" for i in range(count)]
@@ -84,7 +111,7 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.cancel_reset.text() == "&Cancel / Reset"
     assert window.cancel_reset.isEnabled()
     assert window.cancel_reset.geometry().top() == window.download.geometry().top()
-    assert window.download_videos.text() == "&Download Videos"
+    assert window.download_videos.text() == "&Download Profile"
     assert not window.download_videos.isEnabled()
     assert not window.start_indexing.isEnabled()
     qtbot.keyClicks(window.source, "@alice")
@@ -198,7 +225,7 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     if not automatic:
-        assert window.statusBar().currentMessage() == "Scan complete — 2 total results. Click Download Videos."
+        assert window.statusBar().currentMessage() == "Scan complete — 2 total results. Click Download Profile."
         assert window.download_videos.isEnabled()
         qtbot.wait(500)
         assert server[1]["/api/hd"] == 0

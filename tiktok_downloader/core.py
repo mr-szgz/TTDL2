@@ -23,12 +23,15 @@ class Job:
     scroll_ms: int = 10000
     site: str = "https://www.tiktok.com"
     hd_api: str = "https://www.tikwm.com/api/"
+    session_path: str = ""
+    restore_session: bool = False
 
 class Control:
     def __init__(self):
         self.ready = threading.Event()
         self.ready.set()
         self.stopped = threading.Event()
+        self.save_session = threading.Event()
 
     def pause(self):
         self.ready.clear()
@@ -94,12 +97,18 @@ class Downloader:
             elif job.browser in ("chrome", "msedge"):
                 options["channel"] = job.browser
             browser = engine.launch(**options)
-            context = browser.new_context()
+            context = browser.new_context(storage_state=job.session_path if job.restore_session else None)
             page = context.new_page()
             page.goto(f"{job.site}/@{quote(username)}", wait_until="domcontentloaded", timeout=120000)
             if job.manual_start:
                 self.control.pause()
                 self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
+                while not self.control.ready.is_set():
+                    if self.control.save_session.is_set():
+                        self.control.save_session.clear()
+                        context.storage_state(path=job.session_path, indexed_db=True)
+                        self.emit({"type": "session_saved", "path": job.session_path})
+                    page.wait_for_timeout(100)
             if self.control.checkpoint() and not job.headless:
                 session = context.new_cdp_session(page)
                 window_id = session.send("Browser.getWindowForTarget")["windowId"]

@@ -1,6 +1,7 @@
 from dataclasses import asdict
 import codecs
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -12,8 +13,9 @@ from PySide6.QtWidgets import (
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
     QPlainTextEdit, QProgressBar, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
+from playwright.sync_api import sync_playwright
 
-from .core import Job, filename_component, profile_name, read_links
+from .core import Job, filename_component, profile_name, read_links, system_browser
 from . import __version__
 from .progress import DownloadProgress
 from .settings import AppState, CONFIG_DIR, Settings
@@ -31,6 +33,11 @@ class MainWindow(QMainWindow):
         self.process.finished.connect(self.process_finished)
         self.process.started.connect(self.cancel_started_process)
         self.process.errorOccurred.connect(self.process_error)
+        self.browser_install_process = QProcess(self)
+        self.browser_install_process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        self.browser_install_decoder = codecs.getincrementaldecoder("utf-8")()
+        self.browser_install_process.readyReadStandardOutput.connect(self.read_browser_install_output)
+        self.browser_install_process.finished.connect(self.browser_install_finished)
         self.resetting = False
         self.closing = False
         self.paused = False
@@ -131,13 +138,22 @@ class MainWindow(QMainWindow):
         options.addStretch()
         open_folder = QPushButton("Open &Downloads")
         open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.destination.text())))
-        options.addWidget(open_folder)
         form.addRow(options)
         layout.addWidget(self.inputs)
         actions = QHBoxLayout()
         self.download = QPushButton("Create &Session")
         self.download.setObjectName("downloadButton")
         self.download.clicked.connect(self.start_download)
+        self.save_session_button = QPushButton("Sa&ve Session")
+        self.save_session_button.setObjectName("saveSessionButton")
+        self.save_session_button.setToolTip("Save browser cookies, local storage, and IndexedDB after logging in")
+        self.save_session_button.setEnabled(False)
+        self.save_session_button.clicked.connect(self.save_browser_session)
+        self.restore_session_button = QPushButton("Res&tore Session")
+        self.restore_session_button.setObjectName("restoreSessionButton")
+        self.restore_session_button.setToolTip("Open a browser using the saved session")
+        self.restore_session_button.setEnabled(self.preferences.session_path.is_file())
+        self.restore_session_button.clicked.connect(lambda: self.start_download(restore_session=True))
         self.start_indexing = QPushButton("&Scan Profile")
         self.start_indexing.setObjectName("startIndexingButton")
         self.start_indexing.setEnabled(False)
@@ -146,7 +162,7 @@ class MainWindow(QMainWindow):
         self.cancel_reset.setObjectName("cancelResetButton")
         self.cancel_reset.setToolTip("Cancel the current operation, close its browser, and reset the session")
         self.cancel_reset.clicked.connect(self.reset_session)
-        self.download_videos = QPushButton("&Download Videos")
+        self.download_videos = QPushButton("&Download Profile")
         self.download_videos.setEnabled(False)
         self.download_videos.clicked.connect(lambda: self.start_job(self.scanned_job, self.scanned_links))
         self.source.textChanged.connect(self.clear_scan)
@@ -158,11 +174,17 @@ class MainWindow(QMainWindow):
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
         actions.addWidget(self.download)
+        actions.addWidget(self.save_session_button)
+        actions.addWidget(self.restore_session_button)
+        actions.addWidget(self.cancel_reset)
+        actions.addStretch()
+        layout.addLayout(actions)
+        actions = QHBoxLayout()
         actions.addWidget(self.start_indexing)
         actions.addWidget(self.download_videos)
         actions.addWidget(self.pause)
         actions.addWidget(self.stop)
-        actions.addWidget(self.cancel_reset)
+        actions.addWidget(open_folder)
         actions.addStretch()
         layout.addLayout(actions)
         self.auto_download = QCheckBox("&Automatically download videos")
@@ -186,6 +208,23 @@ class MainWindow(QMainWindow):
         self.browser.setCurrentText(self.settings.browser)
         self.browser.currentTextChanged.connect(lambda value: self.update_option("browser", value))
         settings_form.addRow("&Browser", self.browser)
+        browser_actions = QHBoxLayout()
+        self.download_browser_button = QPushButton("&Download Browser")
+        self.download_browser_button.clicked.connect(lambda: self.install_browser(False))
+        self.check_browser_button = QPushButton("&Check Browser")
+        self.check_browser_button.clicked.connect(self.check_browser)
+        self.reinstall_browser_button = QPushButton("&Reinstall Browser")
+        self.reinstall_browser_button.setToolTip("Force a fresh installation of the selected browser")
+        self.reinstall_browser_button.clicked.connect(lambda: self.install_browser(True))
+        browser_actions.addWidget(self.download_browser_button)
+        browser_actions.addWidget(self.check_browser_button)
+        browser_actions.addWidget(self.reinstall_browser_button)
+        browser_actions.addStretch()
+        settings_form.addRow("", browser_actions)
+        self.browser_status = QLabel()
+        self.browser_status.setObjectName("browserStatus")
+        self.browser_status.setWordWrap(True)
+        settings_form.addRow("", self.browser_status)
         self.executable = QLineEdit(self.settings.executable)
         self.executable.setPlaceholderText("Optional custom browser executable, e.g. Brave")
         self.executable.textChanged.connect(lambda value: self.update_option("executable", value))
@@ -211,6 +250,64 @@ class MainWindow(QMainWindow):
         settings_actions.addStretch()
         settings_layout.addLayout(settings_actions)
         settings_layout.addStretch()
+        self.browser.currentTextChanged.connect(self.check_browser)
+        self.executable.textChanged.connect(self.check_browser)
+        self.check_browser()
+
+    def check_browser(self):
+        browser = self.browser.currentText()
+        executable = self.executable.text()
+        managed = browser != "system" and not executable
+        self.download_browser_button.setEnabled(managed)
+        self.reinstall_browser_button.setEnabled(managed)
+        if browser == "system" and not executable:
+            executable = system_browser()
+        if "firefox" in executable.lower() or (not executable and browser in ("chromium", "firefox")):
+            with sync_playwright() as playwright:
+                engine = playwright.firefox if browser == "firefox" or "firefox" in executable.lower() else playwright.chromium
+                paths = [Path(engine.executable_path)]
+        elif executable:
+            paths = [Path(executable)]
+        else:
+            relative = {"chrome": "Google/Chrome/Application/chrome.exe",
+                        "msedge": "Microsoft/Edge/Application/msedge.exe"}[browser]
+            paths = [Path(os.environ[root]) / relative
+                     for root in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)")]
+        installed = any(path.is_file() for path in paths)
+        self.browser_status.setText("Browser installed" if installed else "Browser not installed")
+        self.browser_status.setToolTip("\n".join(str(path) for path in paths))
+        if not managed:
+            self.browser_status.setText(self.browser_status.text() + " — system/custom browser managed externally")
+
+    def install_browser(self, force):
+        arguments = ["-m", "playwright", "install", self.browser.currentText()]
+        if force:
+            arguments.append("--force")
+        self.browser_install_decoder.reset()
+        self.browser_status.setText("Reinstalling browser…" if force else "Downloading browser…")
+        self.set_busy(True)
+        self.pause.setEnabled(False)
+        self.stop.setEnabled(False)
+        self.cancel_reset.setEnabled(False)
+        self.start_indexing.setEnabled(False)
+        self.download_videos.setEnabled(False)
+        self.browser_install_process.setProgram(sys.executable)
+        self.browser_install_process.setArguments(arguments)
+        self.browser_install_process.start()
+
+    def read_browser_install_output(self):
+        self.log.appendPlainText(self.browser_install_decoder.decode(
+            bytes(self.browser_install_process.readAllStandardOutput())))
+
+    def browser_install_finished(self, code, status):
+        self.read_browser_install_output()
+        self.set_busy(False)
+        self.cancel_reset.setEnabled(True)
+        self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
+        self.check_browser()
+        self.statusBar().showMessage(f"Browser installer exited with code {code}")
+        if self.closing:
+            self.close()
 
     def load_profile_list(self):
         self.profiles = read_links(self.profile_list.text())
@@ -262,9 +359,16 @@ class MainWindow(QMainWindow):
         self.apply_settings()
         self.statusBar().showMessage("Defaults restored. Click Save Settings to keep these values.")
 
-    def start_download(self):
+    def start_download(self, checked=False, *, restore_session=False):
         settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
-        self.start_job(Job(source=self.source.text(), folder=self.destination.text(), **settings))
+        self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
+                           restore_session=restore_session, **settings))
+
+    def save_browser_session(self):
+        self.save_session_button.setEnabled(False)
+        self.start_indexing.setEnabled(False)
+        self.process.write(b"save_session\n")
+        self.statusBar().showMessage("Saving browser session…")
 
     def clear_scan(self):
         self.scanned_links = None
@@ -292,6 +396,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"No saved scan found: {path}")
 
     def start_job(self, job, links=None):
+        job.session_path = str(self.preferences.session_path)
         self.save_config()
         self.status_timer.stop()
         self.download_progress = None
@@ -318,6 +423,8 @@ class MainWindow(QMainWindow):
     def set_busy(self, busy):
         self.inputs.setEnabled(not busy)
         self.download.setEnabled(not busy)
+        self.save_session_button.setEnabled(False)
+        self.restore_session_button.setEnabled(not busy and self.preferences.session_path.is_file())
         self.settings_tab.setEnabled(not busy)
         self.pause.setEnabled(busy)
         self.stop.setEnabled(busy)
@@ -335,6 +442,7 @@ class MainWindow(QMainWindow):
 
     def begin_indexing(self):
         self.save_config()
+        self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.paused = False
         self.process.write(b"resume\n")
@@ -345,6 +453,7 @@ class MainWindow(QMainWindow):
 
     def stop_download(self):
         self.stopping = True
+        self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.process.write(b"stop\n")
         self.pause.setEnabled(False)
@@ -409,9 +518,15 @@ class MainWindow(QMainWindow):
                 self.log.appendPlainText(event["message"])
             if event["type"] == "manual":
                 self.paused = True
+                self.save_session_button.setEnabled(True)
                 self.pause.setEnabled(False)
                 self.start_indexing.setEnabled(True)
                 self.statusBar().showMessage("Waiting for you to click Scan Profile")
+            elif event["type"] == "session_saved":
+                self.save_session_button.setEnabled(not self.stopping)
+                self.start_indexing.setEnabled(not self.stopping)
+                self.log.appendPlainText(f"Browser session saved: {event['path']}")
+                self.statusBar().showMessage("Browser session saved. Click Scan Profile when ready.")
             elif event["type"] == "scanned":
                 self.scanned_links = event["links"]
             elif event["type"] == "indexing":
@@ -464,7 +579,7 @@ class MainWindow(QMainWindow):
                 if self.auto_download.isChecked():
                     self.start_job(self.scanned_job, self.scanned_links)
                     return
-                self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} total results. Click Download Videos.")
+                self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} total results. Click Download Profile.")
             else:
                 self.statusBar().showMessage("Completed")
             if self.settings.notifications and not self.stopping:
@@ -472,7 +587,10 @@ class MainWindow(QMainWindow):
         self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
 
     def closeEvent(self, event):
-        if self.process.state() != QProcess.ProcessState.NotRunning:
+        if self.browser_install_process.state() != QProcess.ProcessState.NotRunning:
+            self.closing = True
+            event.ignore()
+        elif self.process.state() != QProcess.ProcessState.NotRunning:
             self.closing = True
             if not self.resetting:
                 self.reset_session()
