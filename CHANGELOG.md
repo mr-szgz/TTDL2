@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-09-19
+
+### Added
+
+- Windows setup installer with a private Python runtime, dependencies, and Chromium.
+- Profile lists loaded from text files, with Next and Prev controls that stop at either end.
+- Persistent configuration and saved window state.
+
+### Changed
+
+- Downloads start automatically after scanning by default; manual downloads remain available.
+- Download progress reports transferred bytes, average speed, and a post-based ETA.
+- Renamed session and folder controls and simplified the settings layout.
+- Simplified the README with direct installer and releases links and `uv run ttdl2` for local runs.
+
 ### Fixed
 
 - Removed the 1.9-second wait before every video and photo; reuse HTTP connections across each download batch and stream in 64 KiB chunks.
@@ -30,5 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.0.0...HEAD
+[3.0.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.0.0
 [2.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v2.1.0
