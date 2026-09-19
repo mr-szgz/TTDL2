@@ -138,6 +138,7 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     downloads_group = next(group for group in window.settings_tab.findChildren(QGroupBox)
                            if group.title() == "Scanning && Downloads")
     assert settings_layout.itemAt(0).layout().labelForField(window.config_path).text() == "User config path"
+    assert settings_layout.itemAt(0).layout().labelForField(window.state_path).text() == "Saved state path"
     assert browser_group.title() == "Browser"
     assert browser_group.isAncestorOf(window.browser)
     assert browser_group.isAncestorOf(window.executable)
