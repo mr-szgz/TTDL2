@@ -107,8 +107,8 @@ def test_save_session_and_restore_after_restart(window, qtbot, job_factory, tmp_
     assert "cookies" in json.loads(path.read_text())
     assert window.start_indexing.isEnabled()
     assert not window.restore_session_button.isEnabled()
-    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: not window.resetting, timeout=5000)
+    qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
     assert window.restore_session_button.isEnabled()
     reopened = MainWindow(tmp_path)
     qtbot.addWidget(reopened)
@@ -182,9 +182,9 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.download.text() == "Create &Session"
     assert window.start_indexing.isVisible()
     assert window.start_indexing.text() == "&Scan Profile"
-    assert window.cancel_reset.text() == "&Cancel / Reset"
-    assert window.cancel_reset.isEnabled()
-    assert window.cancel_reset.geometry().top() == window.download.geometry().top()
+    assert window.reset_session_button.text() == "&Reset session"
+    assert window.reset_session_button.isEnabled()
+    assert window.reset_session_button.geometry().top() == window.download.geometry().top()
     assert window.download_videos.text() == "&Download Profile"
     assert not window.download_videos.isEnabled()
     assert not window.start_indexing.isEnabled()
@@ -263,8 +263,8 @@ def test_open_browser_click_uses_hd_mass_job(window, qtbot, monkeypatch, tmp_pat
 def test_indexing_events_without_page(window, monkeypatch):
     events = QBuffer()
     events.setData(
-        b'{"type":"indexing","total":1,"added":1}\n'
-        b'{"type":"indexing","total":1,"added":0}\n'
+        b'{"type":"indexing","total":1,"added":1,"scan_ms":12,"delay_ms":0,"round_ms":12}\n'
+        b'{"type":"indexing","total":1,"added":0,"scan_ms":8,"delay_ms":150,"round_ms":163}\n'
         b'{"type":"scanned","links":["https://www.tiktok.com/@alice/video/123"]}\n'
         b'{"type":"done","stopped":false}\n'
     )
@@ -275,10 +275,10 @@ def test_indexing_events_without_page(window, monkeypatch):
     window.read_events()
 
     assert window.log.toPlainText().splitlines() == [
-        "Indexed 1 unique posts — 1 new posts found",
-        "Indexed 1 unique posts — 0 new posts found",
+        "Indexed 1 unique posts | 1 new posts found | Scan 12 ms | Delay 0 ms | Total 12 ms",
+        "Indexed 1 unique posts | 0 new posts found | Scan 8 ms | Delay 150 ms | Total 163 ms",
     ]
-    assert window.statusBar().currentMessage() == "Indexed 1 unique posts — 0 new posts found"
+    assert window.statusBar().currentMessage() == window.log.toPlainText().splitlines()[-1]
     assert window.scanned_links == ["https://www.tiktok.com/@alice/video/123"]
     assert window.completed
 
@@ -322,8 +322,8 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     assert (Path(job.folder) / "alice" / "video" / "123_HD.mp4").exists()
     assert window.download.isEnabled()
     assert not window.start_indexing.isEnabled()
-    assert "Indexed 1 unique posts — 1 new posts found" in statuses
-    assert "Indexed 2 unique posts — 1 new posts found" in statuses
+    assert any(message.startswith("Indexed 1 unique posts | 1 new posts found | Scan ") for message in statuses)
+    assert any(message.startswith("Indexed 2 unique posts | 1 new posts found | Scan ") for message in statuses)
     assert "Downloading (1/2) — 0 bytes downloaded — 0.00 MB/s — ETA calculating…" in statuses
     assert any(message.startswith("Downloading (2/2) — ") and "MB/s — ETA" in message for message in statuses)
     assert not window.status_timer.isActive()
@@ -345,17 +345,20 @@ def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
     assert existing.read_text() == "previously collected URLs"
 
 
-@pytest.mark.parametrize("stage", ["starting", "setup", "scanning"])
-def test_cancel_reset_closes_scan_and_allows_restart(window, qtbot, job_factory, server, stage):
+@pytest.mark.parametrize("stage", ["starting", "setup", "scanning", "paused"])
+def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server, stage):
     job = job_factory(manual_start=True, headless=False, scroll_ms=10000)
     existing = window.preferences.scan_dir / "alice_combined_links.txt"
     existing.write_text("previously collected URLs")
     window.start_job(job)
     if stage != "starting":
         qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
-    if stage == "scanning":
+    if stage in ("scanning", "paused"):
         qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
         qtbot.waitUntil(lambda: server[1]["/indexing"] > 0, timeout=10000)
+    if stage == "paused":
+        qtbot.mouseClick(window.pause, Qt.MouseButton.LeftButton)
+        assert window.paused
     if stage == "setup":
         command = ["powershell", "-NoProfile", "-Command",
                    "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"]
@@ -365,23 +368,29 @@ def test_cancel_reset_closes_scan_and_allows_restart(window, qtbot, job_factory,
                            if p["ParentProcessId"] in descendants} - descendants:
             descendants.update(children)
         assert any(p["ProcessId"] in descendants and p["Name"] == "chrome.exe" for p in processes)
-    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: not window.resetting, timeout=5000)
+    assert not window.reset_session_button.isEnabled()
+    retained_log = window.log.toPlainText()
+    qtbot.mouseClick(window.reset_session_button, Qt.MouseButton.LeftButton)
+    assert window.scanned_job is job
+    assert window.process.state() != QProcess.ProcessState.NotRunning
+    assert window.log.toPlainText() == retained_log
+    qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
     assert window.process.state() == QProcess.ProcessState.NotRunning
-    assert window.statusBar().currentMessage() == "Ready"
+    assert window.statusBar().currentMessage() == "Stopped"
     assert window.scanned_links is None
-    assert window.scanned_job is None
+    assert window.scanned_job is job
     assert window.download_progress is None
     assert not window.status_timer.isActive()
-    assert not window.scanning
+    assert window.scanning
     assert not window.paused
     assert not window.start_indexing.isEnabled()
     assert not window.download_videos.isEnabled()
     assert not window.pause.isEnabled()
     assert not window.stop.isEnabled()
     assert window.download.isEnabled()
-    assert window.cancel_reset.isEnabled()
-    assert window.log.toPlainText() == ""
+    assert window.reset_session_button.isEnabled()
+    assert window.log.toPlainText() == retained_log
     assert existing.read_text() == "previously collected URLs"
     assert server[1]["/api/hd"] == 0
     if stage == "setup":
@@ -389,24 +398,35 @@ def test_cancel_reset_closes_scan_and_allows_restart(window, qtbot, job_factory,
         assert not descendants.intersection(p["ProcessId"] for p in remaining)
     window.start_job(job)
     qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
-    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: not window.resetting, timeout=5000)
+    qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
 
 
-def test_reset_idle_clears_restored_scan_without_changing_inputs(window, qtbot, tmp_path):
+def test_reset_idle_clears_restored_scan_without_changing_inputs(window, qtbot, tmp_path, monkeypatch):
     window.source.setText("@alice")
     window.destination.setText(str(tmp_path))
     window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
     window.auto_download.setChecked(False)
-    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+    window.log.appendPlainText("Previous activity")
+    window.progress.setRange(0, 5)
+    window.progress.setValue(3)
+    window.preferences.session_path.write_text('{"cookies": []}')
+    saved_session = window.preferences.session_path.read_bytes()
+    cancellations = []
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: cancellations.append(args))
+    qtbot.mouseClick(window.reset_session_button, Qt.MouseButton.LeftButton)
     assert window.source.text() == "@alice"
     assert window.destination.text() == str(tmp_path)
+    assert cancellations == []
+    assert window.preferences.session_path.read_bytes() == saved_session
+    assert window.log.toPlainText() == ""
+    assert window.progress.value() == 0
     assert window.scanned_links is None
     assert not window.download_videos.isEnabled()
     assert window.statusBar().currentMessage() == "Ready"
 
 
-def test_cancel_discards_queued_scan_completion(window, monkeypatch):
+def test_stop_discards_queued_scan_completion(window, monkeypatch):
     events = QBuffer()
     events.setData(b'{"type":"manual","message":"Ready"}\n'
                    b'{"type":"scanned","links":["https://www.tiktok.com/@alice/video/123"]}\n'
@@ -414,18 +434,18 @@ def test_cancel_discards_queued_scan_completion(window, monkeypatch):
     events.open(QIODevice.OpenModeFlag.ReadOnly)
     monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
     monkeypatch.setattr(window.process, "readLine", events.readLine)
-    window.resetting = True
+    window.stopping = True
     window.scanning = True
     jobs = []
     monkeypatch.setattr(window, "start_job", lambda *args: jobs.append(args))
     window.process_finished(1, QProcess.ExitStatus.CrashExit)
     assert jobs == []
     assert window.scanned_links is None
-    assert window.statusBar().currentMessage() == "Ready"
+    assert window.statusBar().currentMessage() == "Stopped"
 
 
-@pytest.mark.parametrize("action", ["reset", "close"])
-def test_cancel_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
+@pytest.mark.parametrize("action", ["stop", "close"])
+def test_stop_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
     from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
     import threading
     from tiktok_downloader.core import Job
@@ -458,22 +478,27 @@ def test_cancel_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
         thread.start()
         origin = f"http://127.0.0.1:{http.server_port}"
         job = Job(source="@alice", folder=str(tmp_path), hd_api=origin + "/api/")
-        window.start_job(job, [origin + "/@alice/video/123"])
+        window.scanned_links = [origin + "/@alice/video/123"]
+        window.scanned_job = job
+        window.start_job(job, window.scanned_links)
         partial = tmp_path / "alice" / "video" / "123_HD.mp4.part"
         qtbot.waitUntil(lambda: transferring.is_set() and partial.exists() and partial.stat().st_size > 0,
                         timeout=10000)
-        if action == "reset":
-            qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+        if action == "stop":
+            qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
         else:
             window.close()
-        qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning and not window.resetting,
+        qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning,
                         timeout=5000)
         release.set()
         http.shutdown()
         thread.join()
+    assert window.scanned_links == [origin + "/@alice/video/123"]
+    assert window.scanned_job is job
+    assert window.download_progress is not None
     assert partial.exists()
     assert not partial.with_suffix("").exists()
-    assert window.statusBar().currentMessage() == "Ready"
+    assert window.statusBar().currentMessage() == "Stopped"
     if action == "close":
         assert not window.isVisible()
 

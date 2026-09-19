@@ -104,7 +104,7 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     assert not window.save_settings_button.isEnabled()
     assert not window.restore_defaults_button.isEnabled()
     window.tabs.setCurrentWidget(window.download_tab)
-    assert window.cancel_reset.isEnabled()
+    assert not window.reset_session_button.isEnabled()
     window.set_busy(False)
     window.tabs.setCurrentWidget(window.settings_tab)
     assert window.browser.isEnabled()
@@ -159,10 +159,10 @@ def test_browser_install_process_refreshes_status(qtbot, tmp_path, monkeypatch, 
     qtbot.mouseClick(button, Qt.MouseButton.LeftButton)
     assert not window.check_browser_button.isEnabled()
     assert not window.download.isEnabled()
-    assert not window.cancel_reset.isEnabled()
+    assert not window.reset_session_button.isEnabled()
     assert arguments == ["-m", "playwright", "install", "chromium"] + (["--force"] if force else [])
     qtbot.waitUntil(lambda: window.check_browser_button.isEnabled(), timeout=10000)
     assert window.browser_status.text() == "Browser installed"
     assert window.download.isEnabled()
-    assert window.cancel_reset.isEnabled()
+    assert window.reset_session_button.isEnabled()
     assert window.statusBar().currentMessage() == "Browser installer exited with code 0"

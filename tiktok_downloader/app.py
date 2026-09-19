@@ -38,7 +38,6 @@ class MainWindow(QMainWindow):
         self.browser_install_decoder = codecs.getincrementaldecoder("utf-8")()
         self.browser_install_process.readyReadStandardOutput.connect(self.read_browser_install_output)
         self.browser_install_process.finished.connect(self.browser_install_finished)
-        self.resetting = False
         self.closing = False
         self.paused = False
         self.stopping = False
@@ -175,10 +174,10 @@ class MainWindow(QMainWindow):
         self.start_indexing.setObjectName("startIndexingButton")
         self.start_indexing.setEnabled(False)
         self.start_indexing.clicked.connect(self.begin_indexing)
-        self.cancel_reset = QPushButton("&Cancel / Reset")
-        self.cancel_reset.setObjectName("cancelResetButton")
-        self.cancel_reset.setToolTip("Cancel the current operation, close its browser, and reset the session")
-        self.cancel_reset.clicked.connect(self.reset_session)
+        self.reset_session_button = QPushButton("&Reset session")
+        self.reset_session_button.setObjectName("resetSessionButton")
+        self.reset_session_button.setToolTip("Clear the current scan, progress, and log after work has stopped")
+        self.reset_session_button.clicked.connect(self.reset_session)
         self.download_videos = QPushButton("&Download Profile")
         self.download_videos.setEnabled(False)
         self.download_videos.clicked.connect(lambda: self.start_job(self.scanned_job, self.scanned_links))
@@ -187,6 +186,7 @@ class MainWindow(QMainWindow):
         self.pause = QPushButton("&Pause")
         self.pause.clicked.connect(self.toggle_pause)
         self.stop = QPushButton("&Stop")
+        self.stop.setToolTip("Stop the current operation and close its browser")
         self.stop.clicked.connect(self.stop_download)
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
         actions.addWidget(self.download)
         actions.addWidget(self.save_session_button)
         actions.addWidget(self.restore_session_button)
-        actions.addWidget(self.cancel_reset)
+        actions.addWidget(self.reset_session_button)
         actions.addStretch()
         layout.addLayout(actions)
         actions = QHBoxLayout()
@@ -216,6 +216,16 @@ class MainWindow(QMainWindow):
         self.log.setObjectName("activityLog")
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
+        log_actions = QHBoxLayout()
+        log_actions.addStretch()
+        self.select_all_logs_button = QPushButton("Select all")
+        self.select_all_logs_button.clicked.connect(self.log.selectAll)
+        log_actions.addWidget(self.select_all_logs_button)
+        self.copy_logs_button = QPushButton("Copy")
+        self.copy_logs_button.clicked.connect(self.log.selectAll)
+        self.copy_logs_button.clicked.connect(self.log.copy)
+        log_actions.addWidget(self.copy_logs_button)
+        layout.addLayout(log_actions)
         self.statusBar().showMessage("Ready")
         settings_layout = QVBoxLayout(self.settings_tab)
         settings_form = QFormLayout()
@@ -311,7 +321,7 @@ class MainWindow(QMainWindow):
         self.set_busy(True)
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
-        self.cancel_reset.setEnabled(False)
+        self.reset_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.download_videos.setEnabled(False)
         self.browser_install_process.setProgram(sys.executable)
@@ -325,7 +335,7 @@ class MainWindow(QMainWindow):
     def browser_install_finished(self, code, status):
         self.read_browser_install_output()
         self.set_busy(False)
-        self.cancel_reset.setEnabled(True)
+        self.reset_session_button.setEnabled(True)
         self.download_videos.setEnabled(bool(self.scanned_links))
         self.check_browser()
         self.statusBar().showMessage(f"Browser installer exited with code {code}")
@@ -465,6 +475,7 @@ class MainWindow(QMainWindow):
         self.process.write((json.dumps({"job": asdict(job), "links": links}) + "\n").encode())
 
     def set_busy(self, busy):
+        self.reset_session_button.setEnabled(not busy)
         self.inputs.setEnabled(not busy)
         self.download_videos.setEnabled(not busy and bool(self.scanned_links))
         self.download.setEnabled(not busy)
@@ -499,42 +510,29 @@ class MainWindow(QMainWindow):
 
     def stop_download(self):
         self.stopping = True
+        self.status_timer.stop()
         self.download.setEnabled(False)
         self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
-        self.process.write(b"stop\n")
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
-        self.show_work_status()
-
-    def reset_session(self):
-        self.resetting = True
-        self.stopping = True
-        self.status_timer.stop()
-        self.set_busy(True)
-        self.cancel_reset.setEnabled(False)
-        self.start_indexing.setEnabled(False)
-        self.download_videos.setEnabled(False)
-        self.pause.setEnabled(False)
-        self.stop.setEnabled(False)
-        self.statusBar().showMessage("Cancelling…")
-        if self.process.state() == QProcess.ProcessState.NotRunning:
-            self.finish_reset()
-        elif self.process.state() == QProcess.ProcessState.Running:
+        self.statusBar().showMessage("Stopping…")
+        if self.process.state() == QProcess.ProcessState.Running:
             self.cancel_started_process()
 
     def cancel_started_process(self):
-        if self.resetting:
+        if self.stopping:
             subprocess.run(["taskkill", "/PID", str(self.process.processId()), "/T", "/F"],
                            check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
-    def finish_reset(self):
+    def reset_session(self):
+        self.status_timer.stop()
         self.clear_scan()
         self.download_progress = None
-        self.paused = self.stopping = self.completed = self.scanning = self.resetting = False
+        self.paused = self.stopping = self.completed = self.scanning = False
         self.stderr_decoder.reset()
         self.set_busy(False)
-        self.cancel_reset.setEnabled(True)
+        self.reset_session_button.setEnabled(True)
         self.start_indexing.setEnabled(False)
         self.pause.setText("&Pause")
         self.progress.setRange(0, 1)
@@ -544,11 +542,9 @@ class MainWindow(QMainWindow):
         self.work_status = "Ready"
         self.statusBar().showMessage(self.work_status)
         self.download.setFocus()
-        if self.closing:
-            self.close()
 
     def process_error(self, _):
-        if not self.resetting:
+        if not self.stopping:
             self.log.appendPlainText(self.process.errorString())
 
     def show_work_status(self):
@@ -559,7 +555,7 @@ class MainWindow(QMainWindow):
     def read_events(self):
         while self.process.canReadLine():
             event = json.loads(bytes(self.process.readLine()).decode())
-            if self.resetting:
+            if self.stopping:
                 continue
             if event["type"] in ("log", "manual"):
                 self.log.appendPlainText(event["message"])
@@ -591,7 +587,9 @@ class MainWindow(QMainWindow):
                 self.scanned_links = event["links"]
                 self.refresh_profile_scans()
             elif event["type"] == "indexing":
-                self.work_status = f"Indexed {event['total']} unique posts — {event['added']} new posts found"
+                self.work_status = (f"Indexed {event['total']} unique posts | {event['added']} new posts found"
+                                    f" | Scan {event['scan_ms']:.0f} ms | Delay {event['delay_ms']:.0f} ms"
+                                    f" | Total {event['round_ms']:.0f} ms")
                 self.log.appendPlainText(self.work_status)
                 self.show_work_status()
             elif event["type"] == "downloading":
@@ -626,17 +624,19 @@ class MainWindow(QMainWindow):
         self.read_events()
         self.read_errors()
         self.status_timer.stop()
-        if self.resetting:
-            self.finish_reset()
-            return
         self.set_busy(False)
         self.start_indexing.setEnabled(False)
-        if code != 0 or status == QProcess.ExitStatus.CrashExit:
+        if self.stopping:
+            self.paused = False
+            self.pause.setText("&Pause")
+            if self.progress.maximum() == 0:
+                self.progress.setRange(0, 1)
+                self.progress.setValue(0)
+            self.statusBar().showMessage("Stopped")
+        elif code != 0 or status == QProcess.ExitStatus.CrashExit:
             self.statusBar().showMessage(f"Process exited with code {code}; see traceback above")
         elif self.completed:
-            if self.stopping:
-                self.statusBar().showMessage("Stopped")
-            elif self.scanning:
+            if self.scanning:
                 if self.auto_download.isChecked():
                     self.start_job(self.scanned_job, self.scanned_links)
                     return
@@ -646,6 +646,8 @@ class MainWindow(QMainWindow):
             if self.settings.notifications and not self.stopping:
                 QApplication.alert(self)
         self.download_videos.setEnabled(bool(self.scanned_links))
+        if self.closing:
+            self.close()
 
     def closeEvent(self, event):
         if self.browser_install_process.state() != QProcess.ProcessState.NotRunning:
@@ -653,8 +655,8 @@ class MainWindow(QMainWindow):
             event.ignore()
         elif self.process.state() != QProcess.ProcessState.NotRunning:
             self.closing = True
-            if not self.resetting:
-                self.reset_session()
+            if not self.stopping:
+                self.stop_download()
             event.ignore()
         else:
             event.accept()

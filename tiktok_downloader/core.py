@@ -134,7 +134,10 @@ class Downloader:
             indexed = {"video": [], "photo": []}
             total = 0
             last_page = False
+            delay_ms = 0.0
+            scroll_elapsed_ms = 0.0
             while self.control.checkpoint():
+                scan_started = monotonic()
                 previous_total = total
                 for kind in ("video", "photo"):
                     for link in page.locator(f'a[href*="/{kind}/"]').evaluate_all("nodes => nodes.map(n => n.href)"):
@@ -144,13 +147,20 @@ class Downloader:
                             if canonical not in indexed[kind]:
                                 indexed[kind].append(canonical)
                 total = len(indexed["video"]) + len(indexed["photo"])
-                self.emit({"type": "indexing", "total": total, "added": total - previous_total})
+                scan_ms = (monotonic() - scan_started) * 1000
+                self.emit({"type": "indexing", "total": total, "added": total - previous_total,
+                           "scan_ms": scan_ms, "delay_ms": delay_ms,
+                           "round_ms": scroll_elapsed_ms + scan_ms})
                 if last_page:
                     break
+                scroll_started = monotonic()
                 height = page.evaluate("document.body.scrollHeight")
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                delay_started = monotonic()
                 page.wait_for_timeout(job.scroll_ms)
+                delay_ms = (monotonic() - delay_started) * 1000
                 last_page = height == page.evaluate("document.body.scrollHeight")
+                scroll_elapsed_ms = (monotonic() - scroll_started) * 1000
             links = indexed["video"] + indexed["photo"]
             context.close()
             browser.close()

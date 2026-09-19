@@ -23,8 +23,13 @@ def test_hd_mass_download(job_factory, server):
     transferred = sum(event["bytes"] for event in events if event["type"] == "transfer")
     assert transferred == sum(path.stat().st_size for path in root.rglob("*") if path.suffix in (".mp4", ".jpg"))
     indexing = [event for event in events if event["type"] == "indexing"]
-    assert indexing[0] == {"type": "indexing", "total": 1, "added": 1}
-    assert indexing[-1] == {"type": "indexing", "total": 2, "added": 1}
+    assert [(event["total"], event["added"]) for event in indexing] == [(1, 1), (2, 1)]
+    assert indexing[0]["delay_ms"] == 0
+    assert indexing[0]["round_ms"] == indexing[0]["scan_ms"]
+    assert indexing[-1]["delay_ms"] >= job.scroll_ms
+    for event in indexing:
+        assert event["scan_ms"] > 0
+        assert event["round_ms"] >= event["scan_ms"] + event["delay_ms"]
     assert [event for event in events if event["type"] == "downloading"] == [
         {"type": "downloading", "current": 1, "total": 2},
         {"type": "downloading", "current": 2, "total": 2},
