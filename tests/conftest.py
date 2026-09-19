@@ -100,6 +100,7 @@ def job_factory(server, tmp_path):
         options = dict(source="@alice", folder=str(tmp_path / "downloads"),
                        session_path=str(tmp_path / "browser-session.json"),
                        scan_dir=str(tmp_path / "config" / "scans"),
+                       index_dir=str(tmp_path / "config" / "indexes"),
                        site=origin, hd_api=origin + "/api/hd",
                        browser="chromium", headless=True, manual_start=False, scroll_ms=150)
         options.update(kwargs)

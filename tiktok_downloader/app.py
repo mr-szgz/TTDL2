@@ -619,6 +619,7 @@ class MainWindow(QMainWindow):
     def start_job(self, job, links=None):
         job.session_path = str(self.preferences.session_path)
         job.scan_dir = str(self.preferences.scan_dir)
+        job.index_dir = str(self.preferences.index_dir)
         if self.settings.remember_settings:
             self.save_config()
         self.status_timer.stop()

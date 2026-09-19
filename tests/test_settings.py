@@ -131,6 +131,8 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     assert window.scan_path.text() == str(tmp_path / "scans")
     assert window.scan_path.isReadOnly()
     assert window.preferences.scan_dir.is_dir()
+    assert window.preferences.index_dir == tmp_path / "indexes"
+    assert window.preferences.index_dir.is_dir()
     window.checks["notifications"].setChecked(True)
     window.tabs.setCurrentWidget(window.settings_tab)
     qtbot.waitUntil(window.browser.isVisible)

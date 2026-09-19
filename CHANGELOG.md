@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Store per-profile download index files in the app data directory instead of profile download folders.
+
 ## [3.3.0] - 2026-09-19
 
 ### Fixed

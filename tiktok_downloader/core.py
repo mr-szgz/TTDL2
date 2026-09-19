@@ -27,6 +27,7 @@ class Job:
     session_path: str = str(CONFIG_DIR / "browser-session.json")
     new_session: bool = False
     scan_dir: str = str(CONFIG_DIR / "scans")
+    index_dir: str = str(CONFIG_DIR / "indexes")
 
 class Control:
     def __init__(self):
@@ -186,6 +187,8 @@ class Downloader:
             assets = [("video", f"{media_id}_HD.mp4", data["hdplay"], f"{media_id}_HD")]
         root = Path(job.folder) / filename_component(username)
         root.mkdir(parents=True, exist_ok=True)
+        index_dir = Path(job.index_dir)
+        index_dir.mkdir(parents=True, exist_ok=True)
         if job.json_logs:
             (root / f"{media_id}_HD.json").write_text(json.dumps(raw, indent=2), encoding="utf-8")
         for category, name, asset_url, index_id in assets:
@@ -221,7 +224,7 @@ class Downloader:
             if self.control.stopped.is_set():
                 return False
             partial.replace(destination)
-            with (root / f"{filename_component(username)}_index.txt").open("a", encoding="utf-8") as index:
+            with (index_dir / f"{filename_component(username)}_index.txt").open("a", encoding="utf-8") as index:
                 index.write(index_id + "\n")
             self.log(f"Saved {destination}")
         return True

@@ -18,7 +18,8 @@ def test_hd_mass_download(job_factory, server):
         server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
     assert not list(Path(job.folder).glob("*_combined_links.txt"))
     assert (root / "123_HD.json").exists()
-    assert (root / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
+    assert not (root / "alice_index.txt").exists()
+    assert (Path(job.index_dir) / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
     assert events[-1] == {"type": "done", "stopped": False}
     transferred = sum(event["bytes"] for event in events if event["type"] == "transfer")
     assert transferred == sum(path.stat().st_size for path in root.rglob("*") if path.suffix in (".mp4", ".jpg"))
@@ -132,7 +133,8 @@ def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
         thread = threading.Thread(target=http.serve_forever, daemon=True)
         thread.start()
         origin = f"http://127.0.0.1:{http.server_port}"
-        job = Job(source="@ayvah.nizzari", folder=str(tmp_path), hd_api=origin + "/api/")
+        job = Job(source="@ayvah.nizzari", folder=str(tmp_path), hd_api=origin + "/api/",
+                  index_dir=str(tmp_path / "app-data" / "indexes"))
         events = []
         started = monotonic()
         Downloader(job, events.append, Control()).run([
