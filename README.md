@@ -4,6 +4,11 @@
 
 Download TikTok profile videos and photos
 
+Profile scans are saved in the `scans` subfolder of the app's user config directory.
+Restore Scan reads from that folder, independently of the selected downloads folder.
+Settings shows the saved scans path and provides an Open saved scans folder button.
+Existing `*_combined_links.txt` files can be moved into that folder to restore them.
+
 ## Install
 
 [Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.0.0/TTDL2-3.0.0-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)

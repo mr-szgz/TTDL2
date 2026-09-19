@@ -98,6 +98,7 @@ def job_factory(server, tmp_path):
     origin, _ = server
     def make(**kwargs):
         options = dict(source="@alice", folder=str(tmp_path / "downloads"),
+                       scan_dir=str(tmp_path / "config" / "scans"),
                        site=origin, hd_api=origin + "/api/hd",
                        browser="chromium", headless=True, manual_start=False, scroll_ms=150)
         options.update(kwargs)

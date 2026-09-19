@@ -37,6 +37,8 @@ class Settings:
         self.config_path = directory / "config.json"
         self.state_path = directory / "state.json"
         self.session_path = directory / "browser-session.json"
+        self.scan_dir = directory / "scans"
+        self.scan_dir.mkdir(exist_ok=True)
         self.config = (AppConfig.model_validate_json(self.config_path.read_text(encoding="utf-8"))
                        if self.config_path.exists() else AppConfig())
         self.state = (AppState.model_validate_json(self.state_path.read_text(encoding="utf-8"))

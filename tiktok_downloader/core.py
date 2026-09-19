@@ -8,6 +8,7 @@ from time import monotonic
 from urllib.parse import quote, unquote, urlsplit
 import requests
 from playwright.sync_api import sync_playwright
+from .settings import CONFIG_DIR
 
 @dataclass
 class Job:
@@ -25,6 +26,8 @@ class Job:
     hd_api: str = "https://www.tikwm.com/api/"
     session_path: str = ""
     restore_session: bool = False
+    check_session: bool = False
+    scan_dir: str = str(CONFIG_DIR / "scans")
 
 class Control:
     def __init__(self):
@@ -97,13 +100,24 @@ class Downloader:
             elif job.browser in ("chrome", "msedge"):
                 options["channel"] = job.browser
             browser = engine.launch(**options)
-            context = browser.new_context(storage_state=job.session_path if job.restore_session else None)
+            restore = Path(job.session_path).is_file() if job.check_session else job.restore_session
+            context = browser.new_context(storage_state=job.session_path if restore else None)
             page = context.new_page()
             page.goto(f"{job.site}/@{quote(username)}", wait_until="domcontentloaded", timeout=120000)
-            if job.manual_start:
+            if job.check_session:
+                page.wait_for_load_state("load", timeout=120000)
+                page.wait_for_timeout(3000)
+                challenge = any(locator.is_visible() for frame in page.frames
+                                for locator in frame.get_by_text("Drag the slider to fit the puzzle", exact=True).all())
                 self.control.pause()
-                self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
-                while not self.control.ready.is_set():
+                if not challenge:
+                    context.storage_state(path=job.session_path, indexed_db=True)
+                self.emit({"type": "session_checked", "challenge": challenge})
+            if job.manual_start or job.check_session:
+                if not job.check_session:
+                    self.control.pause()
+                    self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
+                while not self.control.ready.is_set() and not self.control.stopped.is_set():
                     if self.control.save_session.is_set():
                         self.control.save_session.clear()
                         context.storage_state(path=job.session_path, indexed_db=True)
@@ -142,7 +156,8 @@ class Downloader:
             browser.close()
             if self.control.stopped.is_set():
                 return []
-            path = Path(job.folder) / f"{filename_component(username)}_combined_links.txt"
+            Path(job.scan_dir).mkdir(parents=True, exist_ok=True)
+            path = Path(job.scan_dir) / f"{filename_component(username)}_combined_links.txt"
             path.write_text("\n".join(links), encoding="utf-8")
             self.log(f"Indexing complete — {len(links)} total results. Saved URLs to {path}")
         return read_links(path)

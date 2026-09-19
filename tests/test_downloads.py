@@ -14,8 +14,9 @@ def test_hd_mass_download(job_factory, server):
     assert (root / "video" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
     for i in (1, 2):
         assert (root / "photo" / f"456_{i}.jpg").read_bytes() == f"fixture-media:/media/{i}.jpg".encode()
-    assert (Path(job.folder) / "alice_combined_links.txt").read_text().splitlines() == [
+    assert (Path(job.scan_dir) / "alice_combined_links.txt").read_text().splitlines() == [
         server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
+    assert not list(Path(job.folder).glob("*_combined_links.txt"))
     assert (root / "123_HD.json").exists()
     assert (root / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
     assert events[-1] == {"type": "done", "stopped": False}

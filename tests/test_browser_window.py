@@ -1,4 +1,6 @@
 from playwright.sync_api import Browser, CDPSession, Page
+import json
+import pytest
 
 from tiktok_downloader.core import Control, Downloader
 
@@ -98,3 +100,49 @@ def test_save_and_restore_browser_storage(job_factory, tmp_path, monkeypatch):
     Downloader(job_factory(restore_session=True, session_path=str(session_path)),
                lambda event: None, Control()).scan()
     assert restored == [["session=secret", "saved-user", "saved-token"]]
+
+
+@pytest.mark.parametrize("saved", [False, True])
+@pytest.mark.parametrize("challenge", [False, True])
+def test_check_session_waits_for_challenge_and_reuses_storage(job_factory, tmp_path, monkeypatch, saved, challenge):
+    session_path = tmp_path / "browser-session.json"
+    job = job_factory(check_session=True, session_path=str(session_path))
+    if saved:
+        session_path.write_text(json.dumps({"cookies": [], "origins": [{
+            "origin": job.site, "localStorage": [{"name": "login", "value": "saved-user"}],
+        }]}))
+    goto = Page.goto
+    pages = []
+
+    def visit(page, url, **kwargs):
+        result = goto(page, url, **kwargs)
+        pages.append(page)
+        assert page.evaluate("localStorage.getItem('login')") == ("saved-user" if saved else None)
+        page.evaluate("""challenge => {
+            const hidden = document.createElement('div');
+            hidden.textContent = 'Drag the slider to fit the puzzle';
+            hidden.style.display = 'none'; document.body.append(hidden);
+            if (challenge) setTimeout(() => {
+                const frame = document.createElement('iframe');
+                frame.srcdoc = '<div>Drag the slider to fit the puzzle</div>';
+                document.body.append(frame);
+            }, 500);
+        }""", challenge)
+        return result
+
+    monkeypatch.setattr(Page, "goto", visit)
+    control = Control()
+    events = []
+
+    def checked(event):
+        events.append(event)
+        if event["type"] == "session_checked":
+            assert not control.ready.is_set()
+            assert event["challenge"] == challenge
+            assert session_path.exists() == (saved or not challenge)
+            control.resume()
+
+    links = Downloader(job, checked, control).scan()
+    assert len(pages) == 1
+    assert len(links) == 2
+    assert not any(event["type"] == "manual" for event in events)

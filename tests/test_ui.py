@@ -24,6 +24,77 @@ def test_profile_list_default_path(window, tmp_path):
     assert window.load_profile_list_button.geometry().bottom() < window.source.geometry().top()
 
 
+def test_check_session_ready_then_scan(window, qtbot, job_factory):
+    window.auto_download.setChecked(False)
+    window.start_job(job_factory(check_session=True))
+    assert not window.check_session_button.isEnabled()
+    assert window.download.isEnabled()
+    qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
+    assert not window.download.isEnabled()
+    assert window.preferences.session_path.is_file()
+    assert window.statusBar().currentMessage() == "Session ready. Click Scan Profile."
+    qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+    assert len(window.scanned_links) == 2
+    assert window.check_session_button.isEnabled()
+
+
+def test_check_session_challenge_enables_setup_in_same_browser(window, qtbot, job_factory, monkeypatch):
+    window.start_job(job_factory(check_session=True))
+    qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
+    window.download.setEnabled(True)
+    events = QBuffer()
+    events.setData(b'{"type":"session_checked","challenge":true}\n')
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    with monkeypatch.context() as patch:
+        patch.setattr(window.process, "canReadLine", events.canReadLine)
+        patch.setattr(window.process, "readLine", events.readLine)
+        window.read_events()
+    assert window.download.isEnabled()
+    assert not window.start_indexing.isEnabled()
+    assert not window.save_session_button.isEnabled()
+    pid = window.process.processId()
+    qtbot.mouseClick(window.download, Qt.MouseButton.LeftButton)
+    assert window.process.processId() == pid
+    assert window.start_indexing.isEnabled()
+    assert window.save_session_button.isEnabled()
+    assert not window.download.isEnabled()
+    qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+
+
+def test_check_session_button_starts_check(window, qtbot, monkeypatch):
+    jobs = []
+    monkeypatch.setattr(window, "start_job", lambda job: jobs.append(job))
+    qtbot.mouseClick(window.check_session_button, Qt.MouseButton.LeftButton)
+    assert jobs[0].check_session
+
+
+def test_create_session_during_check(window, qtbot, job_factory):
+    window.start_job(job_factory(check_session=True))
+    qtbot.mouseClick(window.download, Qt.MouseButton.LeftButton)
+    assert window.session_setup_requested
+    assert not window.start_indexing.isEnabled()
+    assert not window.save_session_button.isEnabled()
+    qtbot.waitUntil(lambda: window.save_session_button.isEnabled(), timeout=30000)
+    assert window.start_indexing.isEnabled()
+    qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+
+
+def test_failed_check_allows_create_session(window, qtbot, job_factory, monkeypatch):
+    window.preferences.session_path.write_text("invalid json")
+    window.start_job(job_factory(check_session=True))
+    assert window.download.isEnabled()
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+    assert window.download.isEnabled()
+    jobs = []
+    monkeypatch.setattr(window, "start_job", lambda job: jobs.append(job))
+    qtbot.mouseClick(window.download, Qt.MouseButton.LeftButton)
+    assert not jobs[0].check_session
+    assert not jobs[0].restore_session
+
+
 def test_save_session_and_restore_after_restart(window, qtbot, job_factory, tmp_path, monkeypatch):
     assert not window.save_session_button.isEnabled()
     assert not window.restore_session_button.isEnabled()
@@ -121,8 +192,9 @@ def test_automatic_download_toggle_respects_scan_and_busy_state(window):
     window.auto_download.setChecked(False)
     assert not window.download_videos.isEnabled()
     window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    window.set_busy(False)
     window.auto_download.setChecked(True)
-    assert not window.download_videos.isEnabled()
+    assert window.download_videos.isEnabled()
     window.auto_download.setChecked(False)
     assert window.download_videos.isEnabled()
     window.auto_download.setChecked(True)
@@ -152,7 +224,7 @@ def test_unsuccessful_scan_does_not_auto_download(window, monkeypatch, code, sta
     window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
     window.process_finished(code, status)
     assert jobs == []
-    assert not window.download_videos.isEnabled()
+    assert window.download_videos.isEnabled()
 
 
 def test_native_defaults(window, qtbot):
@@ -230,7 +302,7 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
         qtbot.wait(500)
         assert server[1]["/api/hd"] == 0
         assert not list(Path(job.folder).rglob("*.mp4"))
-    assert (Path(job.folder) / "alice_combined_links.txt").read_text().splitlines() == window.scanned_links
+    assert (Path(job.scan_dir) / "alice_combined_links.txt").read_text().splitlines() == window.scanned_links
     assert not window.status_timer.isActive()
     browser_visits = server[1]["/@alice"]
     if not automatic:
@@ -238,7 +310,7 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
         assert not window.download_videos.isEnabled()
         assert window.pause.isEnabled()
         qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
-    assert window.download_videos.isEnabled() == (not automatic)
+    assert window.download_videos.isEnabled()
     assert server[1]["/@alice"] == browser_visits
     assert window.statusBar().currentMessage() == "Completed"
     window.source.setText("@another")
@@ -257,8 +329,7 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
 
 def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
     job = job_factory(manual_start=True)
-    existing = Path(job.folder) / "alice_combined_links.txt"
-    existing.parent.mkdir(parents=True)
+    existing = window.preferences.scan_dir / "alice_combined_links.txt"
     existing.write_text("previously collected URLs")
     window.start_job(job)
     qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
@@ -274,8 +345,7 @@ def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
 @pytest.mark.parametrize("stage", ["starting", "setup", "scanning"])
 def test_cancel_reset_closes_scan_and_allows_restart(window, qtbot, job_factory, server, stage):
     job = job_factory(manual_start=True, headless=False, scroll_ms=10000)
-    existing = Path(job.folder) / "alice_combined_links.txt"
-    existing.parent.mkdir(parents=True)
+    existing = window.preferences.scan_dir / "alice_combined_links.txt"
     existing.write_text("previously collected URLs")
     window.start_job(job)
     if stage != "starting":
@@ -418,12 +488,13 @@ def test_worker_traceback(window, qtbot, job_factory, server):
 
 
 @pytest.mark.parametrize("source", ["@alice", "https://www.tiktok.com/@alice/?lang=en"])
-def test_restore_scan_then_download(window, qtbot, tmp_path, server, source):
-    window.auto_download.setChecked(False)
+@pytest.mark.parametrize("automatic", [False, True])
+def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, automatic):
+    window.auto_download.setChecked(automatic)
     folder = tmp_path / "media"
     folder.mkdir()
     links = [server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
-    (folder / "alice_combined_links.txt").write_text("\n".join(links), encoding="utf-8-sig")
+    (window.preferences.scan_dir / "alice_combined_links.txt").write_text("\n".join(links), encoding="utf-8-sig")
     window.source.setText(source)
     window.destination.setText(str(folder))
     qtbot.mouseClick(window.restore_scan_button, Qt.MouseButton.LeftButton)
@@ -437,6 +508,9 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source):
     window.scanned_job.hd_api = server[0] + "/api/hd"
     qtbot.mouseClick(window.download_videos, Qt.MouseButton.LeftButton)
     assert not window.restore_scan_button.isEnabled()
+    assert not window.download_videos.isEnabled()
+    window.auto_download.setChecked(not automatic)
+    assert not window.download_videos.isEnabled()
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     assert window.statusBar().currentMessage() == "Completed"
     assert (folder / "alice" / "video" / "123_HD.mp4").exists()
@@ -448,7 +522,7 @@ def test_restore_missing_scan_disables_download(window, qtbot, tmp_path):
     window.auto_download.setChecked(False)
     window.source.setText("@alice")
     window.destination.setText(str(tmp_path))
-    path = tmp_path / "alice_combined_links.txt"
+    path = window.preferences.scan_dir / "alice_combined_links.txt"
     path.write_text("https://www.tiktok.com/@alice/video/123")
     qtbot.mouseClick(window.restore_scan_button, Qt.MouseButton.LeftButton)
     assert window.download_videos.isEnabled()

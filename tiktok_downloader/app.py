@@ -141,6 +141,10 @@ class MainWindow(QMainWindow):
         form.addRow(options)
         layout.addWidget(self.inputs)
         actions = QHBoxLayout()
+        self.check_session_button = QPushButton("Chec&k Session")
+        self.check_session_button.setObjectName("checkSessionButton")
+        self.check_session_button.setToolTip("Load the saved session or open a new one, then check for CAPTCHA")
+        self.check_session_button.clicked.connect(lambda: self.start_download(check_session=True))
         self.download = QPushButton("Create &Session")
         self.download.setObjectName("downloadButton")
         self.download.clicked.connect(self.start_download)
@@ -173,6 +177,7 @@ class MainWindow(QMainWindow):
         self.stop.clicked.connect(self.stop_download)
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
+        actions.addWidget(self.check_session_button)
         actions.addWidget(self.download)
         actions.addWidget(self.save_session_button)
         actions.addWidget(self.restore_session_button)
@@ -189,8 +194,6 @@ class MainWindow(QMainWindow):
         layout.addLayout(actions)
         self.auto_download = QCheckBox("&Automatically download videos")
         self.auto_download.setChecked(True)
-        self.auto_download.toggled.connect(lambda checked: self.download_videos.setEnabled(
-            not checked and bool(self.scanned_links) and self.download.isEnabled()))
         layout.addWidget(self.auto_download)
         self.progress = QProgressBar()
         self.progress.setRange(0, 1)
@@ -235,6 +238,13 @@ class MainWindow(QMainWindow):
         self.state_path = QLineEdit(str(self.preferences.state_path))
         self.state_path.setReadOnly(True)
         settings_form.addRow("Saved state path", self.state_path)
+        self.scan_path = QLineEdit(str(self.preferences.scan_dir))
+        self.scan_path.setReadOnly(True)
+        settings_form.addRow("Saved scans folder", self.scan_path)
+        self.open_scans_button = QPushButton("Open saved scans folder")
+        self.open_scans_button.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(self.preferences.scan_dir))))
+        settings_form.addRow("", self.open_scans_button)
         open_config = QPushButton("Open config &folder")
         open_config.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(self.preferences.config_path.parent))))
@@ -303,7 +313,7 @@ class MainWindow(QMainWindow):
         self.read_browser_install_output()
         self.set_busy(False)
         self.cancel_reset.setEnabled(True)
-        self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
+        self.download_videos.setEnabled(bool(self.scanned_links))
         self.check_browser()
         self.statusBar().showMessage(f"Browser installer exited with code {code}")
         if self.closing:
@@ -359,10 +369,17 @@ class MainWindow(QMainWindow):
         self.apply_settings()
         self.statusBar().showMessage("Defaults restored. Click Save Settings to keep these values.")
 
-    def start_download(self, checked=False, *, restore_session=False):
+    def start_download(self, checked=False, *, restore_session=False, check_session=False):
+        if self.process.state() != QProcess.ProcessState.NotRunning and self.scanned_job.check_session:
+            self.session_setup_requested = True
+            self.download.setEnabled(False)
+            self.save_session_button.setEnabled(self.paused)
+            self.start_indexing.setEnabled(self.paused)
+            self.statusBar().showMessage("Solve the CAPTCHA in the open browser, then Save Session or Scan Profile.")
+            return
         settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
         self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
-                           restore_session=restore_session, **settings))
+                           restore_session=restore_session, check_session=check_session, **settings))
 
     def save_browser_session(self):
         self.save_session_button.setEnabled(False)
@@ -378,7 +395,7 @@ class MainWindow(QMainWindow):
     def restore_scan(self):
         self.clear_scan()
         username = filename_component(profile_name(self.source.text()))
-        path = Path(self.destination.text()) / f"{username}_combined_links.txt"
+        path = self.preferences.scan_dir / f"{username}_combined_links.txt"
         if path.exists():
             self.scanned_links = read_links(path)
             settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
@@ -391,12 +408,14 @@ class MainWindow(QMainWindow):
             self.work_status = f"Scan restored — {len(self.scanned_links)} total results."
             self.log.appendPlainText(f"{self.work_status} Loaded {path}")
             self.statusBar().showMessage(self.work_status)
-            self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
+            self.download_videos.setEnabled(bool(self.scanned_links))
         else:
             self.statusBar().showMessage(f"No saved scan found: {path}")
 
     def start_job(self, job, links=None):
+        self.session_setup_requested = False
         job.session_path = str(self.preferences.session_path)
+        job.scan_dir = str(self.preferences.scan_dir)
         self.save_config()
         self.status_timer.stop()
         self.download_progress = None
@@ -413,6 +432,7 @@ class MainWindow(QMainWindow):
         self.log.clear()
         self.progress.setRange(0, 0)
         self.set_busy(True)
+        self.download.setEnabled(self.scanning and job.check_session)
         self.pause.setEnabled(not self.scanning)
         self.statusBar().showMessage(self.work_status)
         self.process.setProgram(str(Path(sys.executable).with_name("python.exe")))
@@ -422,7 +442,9 @@ class MainWindow(QMainWindow):
 
     def set_busy(self, busy):
         self.inputs.setEnabled(not busy)
+        self.download_videos.setEnabled(not busy and bool(self.scanned_links))
         self.download.setEnabled(not busy)
+        self.check_session_button.setEnabled(not busy)
         self.save_session_button.setEnabled(False)
         self.restore_session_button.setEnabled(not busy and self.preferences.session_path.is_file())
         self.settings_tab.setEnabled(not busy)
@@ -453,6 +475,7 @@ class MainWindow(QMainWindow):
 
     def stop_download(self):
         self.stopping = True
+        self.download.setEnabled(False)
         self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.process.write(b"stop\n")
@@ -522,6 +545,19 @@ class MainWindow(QMainWindow):
                 self.pause.setEnabled(False)
                 self.start_indexing.setEnabled(True)
                 self.statusBar().showMessage("Waiting for you to click Scan Profile")
+            elif event["type"] == "session_checked":
+                self.paused = True
+                self.pause.setEnabled(False)
+                if not event["challenge"]:
+                    self.download.setEnabled(False)
+                self.save_session_button.setEnabled(self.session_setup_requested and not self.stopping)
+                self.start_indexing.setEnabled((self.session_setup_requested or not event["challenge"]) and not self.stopping)
+                self.work_status = ("CAPTCHA detected. Click Create Session to complete setup in the open browser."
+                                    if event["challenge"] else "Session ready. Click Scan Profile.")
+                if self.session_setup_requested:
+                    self.work_status = "Solve the CAPTCHA in the open browser, then Save Session or Scan Profile."
+                self.log.appendPlainText(self.work_status)
+                self.statusBar().showMessage(self.work_status)
             elif event["type"] == "session_saved":
                 self.save_session_button.setEnabled(not self.stopping)
                 self.start_indexing.setEnabled(not self.stopping)
@@ -584,7 +620,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Completed")
             if self.settings.notifications and not self.stopping:
                 QApplication.alert(self)
-        self.download_videos.setEnabled(bool(self.scanned_links) and not self.auto_download.isChecked())
+        self.download_videos.setEnabled(bool(self.scanned_links))
 
     def closeEvent(self, event):
         if self.browser_install_process.state() != QProcess.ProcessState.NotRunning:
