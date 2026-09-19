@@ -92,6 +92,20 @@ def test_original_hd_provider_failure_is_not_replaced(path, error, job_factory, 
     assert server[1][path] == 1
     assert not list(Path(job.folder).rglob("*.mp4"))
 
+def test_missing_media_is_skipped_and_batch_continues(job_factory, server):
+    job = job_factory(hd_api=server[0] + "/api/hd-missing")
+    events = []
+    Downloader(job, events.append, Control()).run([
+        server[0] + "/@alice/video/123",
+        server[0] + "/@alice/video/789",
+    ])
+    root = Path(job.folder) / "alice" / "video"
+    assert not (root / "123_HD.mp4").exists()
+    assert not (root / "123_HD.mp4.part").exists()
+    assert (root / "789_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
+    assert {"type": "log", "message": "Skipped unavailable media: 123_HD.mp4 (HTTP 404)"} in events
+    assert events[-1] == {"type": "done", "stopped": False}
+
 def test_parsing(tmp_path):
     assert post_parts("https://www.tiktok.com/@a.b/photo/123/?x=1") == ("a.b", "photo", "123")
     assert profile_name("https://www.tiktok.com/@a.b/?lang=en") == "a.b"

@@ -208,23 +208,27 @@ class Downloader:
             destination.parent.mkdir(parents=True, exist_ok=True)
             self.log(f"Downloading {destination.name}")
             partial = destination.with_suffix(destination.suffix + ".part")
-            with session.get(asset_url, stream=True, timeout=120) as response, partial.open("wb") as file:
+            with session.get(asset_url, stream=True, timeout=120) as response:
+                if response.status_code == 404:
+                    self.log(f"Skipped unavailable media: {destination.name} (HTTP 404)")
+                    continue
                 response.raise_for_status()
-                pending_bytes = 0
-                last_update = monotonic()
-                while self.control.checkpoint():
-                    chunk = response.raw.read(65536)
-                    if not chunk:
-                        break
-                    file.write(chunk)
-                    pending_bytes += len(chunk)
-                    now = monotonic()
-                    if now - last_update >= 0.25:
+                with partial.open("wb") as file:
+                    pending_bytes = 0
+                    last_update = monotonic()
+                    while self.control.checkpoint():
+                        chunk = response.raw.read(65536)
+                        if not chunk:
+                            break
+                        file.write(chunk)
+                        pending_bytes += len(chunk)
+                        now = monotonic()
+                        if now - last_update >= 0.25:
+                            self.emit({"type": "transfer", "bytes": pending_bytes})
+                            pending_bytes = 0
+                            last_update = now
+                    if pending_bytes:
                         self.emit({"type": "transfer", "bytes": pending_bytes})
-                        pending_bytes = 0
-                        last_update = now
-                if pending_bytes:
-                    self.emit({"type": "transfer", "bytes": pending_bytes})
             if self.control.stopped.is_set():
                 return False
             partial.replace(destination)

@@ -40,6 +40,13 @@ def server():
                     "author": {"unique_id": "alice"}, "hdplay": origin + "/media/hd.mp4",
                     "images": [origin + "/media/1.jpg", origin + "/media/2.jpg"],
                 }})
+            elif parsed.path == "/api/hd-missing":
+                media_id = parse_qs(parsed.query)["url"][0]
+                media_path = "/media/missing.mp4" if media_id == "123" else "/media/hd.mp4"
+                self.send_json({"code": 0, "data": {
+                    "author": {"unique_id": "alice"}, "hdplay": origin + media_path,
+                    "images": [origin + "/media/1.jpg", origin + "/media/2.jpg"],
+                }})
             elif parsed.path == "/@alice":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -62,6 +69,9 @@ def server():
             elif parsed.path == "/t/short":
                 self.send_response(302)
                 self.send_header("Location", origin + "/@alice/video/123")
+                self.end_headers()
+            elif parsed.path == "/media/missing.mp4":
+                self.send_response(404)
                 self.end_headers()
             elif parsed.path.startswith("/media/"):
                 self.send_response(200)
