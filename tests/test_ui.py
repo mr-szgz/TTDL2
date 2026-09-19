@@ -4,7 +4,7 @@ import subprocess
 import pytest
 from PySide6.QtCore import QBuffer, QIODevice, QProcess, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel
-from tiktok_downloader.app import MainWindow, SettingsDialog
+from tiktok_downloader.app import MainWindow
 from tiktok_downloader.settings import AppConfig, Settings
 
 @pytest.fixture
@@ -72,7 +72,7 @@ def test_profile_list_reload_and_busy_state(window, qtbot, tmp_path):
 
 
 def test_hd_mass_only_screen(window, qtbot):
-    assert not window.findChildren(QComboBox)
+    assert not window.download_tab.findChildren(QComboBox)
     assert window.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
     assert window.auto_download.isChecked()
     assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
@@ -143,7 +143,6 @@ def test_settings(window, tmp_path):
     path = tmp_path / "config.json"
     settings.save(path)
     assert Settings(tmp_path).values == settings
-    assert SettingsDialog(settings, window).settings() == settings
 
 def test_open_browser_click_uses_hd_mass_job(window, qtbot, monkeypatch, tmp_path):
     jobs = []

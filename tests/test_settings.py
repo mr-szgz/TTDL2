@@ -3,9 +3,9 @@ import json
 import pytest
 from pydantic import ValidationError
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QCheckBox, QDialog
+from PySide6.QtWidgets import QDialog, QMenuBar
 
-from tiktok_downloader.app import MainWindow, SettingsDialog
+from tiktok_downloader.app import MainWindow
 from tiktok_downloader.settings import AppConfig, AppState, Settings
 
 
@@ -35,8 +35,9 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     window.source.setText("@alice")
     window.destination.setText(str(tmp_path / "downloads"))
     window.resize(960, 720)
-    window.settings.browser = "firefox"
-    window.settings.executable = "custom-browser"
+    window.tabs.setCurrentWidget(window.settings_tab)
+    window.browser.setCurrentText("firefox")
+    window.executable.setText("custom-browser")
     for check in window.checks.values():
         check.setChecked(True)
     assert not window.preferences.state_path.exists()
@@ -51,7 +52,12 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     assert restored.size() == window.size()
     assert restored.settings == window.settings
     assert all(check.isChecked() for check in restored.checks.values())
-    restored.reset_action.trigger()
+    assert restored.browser.currentText() == "firefox"
+    assert restored.executable.text() == "custom-browser"
+    restored.tabs.setCurrentWidget(restored.settings_tab)
+    qtbot.mouseClick(restored.restore_defaults_button, Qt.MouseButton.LeftButton)
+    assert restored.browser.currentText() == "chromium"
+    assert restored.executable.text() == ""
     assert restored.settings == AppConfig()
     assert not any(check.isChecked() for check in restored.checks.values())
     assert restored.source.text() == ""
@@ -65,27 +71,37 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     assert Settings(tmp_path).values.browser == "chromium"
 
 
-def test_settings_dialog_save_cancel_and_paths(qtbot, tmp_path, monkeypatch):
+def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     window = MainWindow(tmp_path)
     qtbot.addWidget(window)
-    dialog = SettingsDialog(window.settings, window)
-    qtbot.addWidget(dialog)
-    assert dialog.config_path.text() == str(tmp_path / "config.json")
-    assert dialog.state_path.text() == str(tmp_path / "state.json")
-    assert dialog.config_path.isReadOnly()
-    assert not dialog.findChildren(QCheckBox)
+    window.show()
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Download", "Settings"]
+    assert window.tabs.currentWidget() == window.download_tab
+    assert not window.findChildren(QDialog)
+    assert not window.findChildren(QMenuBar)
+    assert window.config_path.text() == str(tmp_path / "config.json")
+    assert window.state_path.text() == str(tmp_path / "state.json")
+    assert window.config_path.isReadOnly()
+    assert window.state_path.isReadOnly()
     window.checks["notifications"].setChecked(True)
-
-    def accept(dialog):
-        dialog.browser.setCurrentText("msedge")
-        return QDialog.DialogCode.Accepted
-
-    monkeypatch.setattr(SettingsDialog, "exec", accept)
-    window.edit_settings()
-    assert Settings(tmp_path).values.browser == "msedge"
-    assert Settings(tmp_path).values.notifications
-    assert not window.preferences.state_path.exists()
-    before = window.preferences.config_path.read_bytes()
-    monkeypatch.setattr(SettingsDialog, "exec", lambda _: QDialog.DialogCode.Rejected)
-    window.edit_settings()
-    assert window.preferences.config_path.read_bytes() == before
+    window.tabs.setCurrentWidget(window.settings_tab)
+    qtbot.waitUntil(window.browser.isVisible)
+    window.browser.setCurrentText("msedge")
+    window.executable.setText("custom-browser")
+    assert not window.preferences.config_path.exists()
+    qtbot.mouseClick(window.save_settings_button, Qt.MouseButton.LeftButton)
+    saved = Settings(tmp_path).values
+    assert saved.browser == "msedge"
+    assert saved.executable == "custom-browser"
+    assert saved.notifications
+    window.set_busy(True)
+    assert not window.browser.isEnabled()
+    assert not window.executable.isEnabled()
+    assert not window.save_settings_button.isEnabled()
+    assert not window.restore_defaults_button.isEnabled()
+    window.tabs.setCurrentWidget(window.download_tab)
+    assert window.cancel_reset.isEnabled()
+    window.set_busy(False)
+    window.tabs.setCurrentWidget(window.settings_tab)
+    assert window.browser.isEnabled()
+    assert window.save_settings_button.isEnabled()

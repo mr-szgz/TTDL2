@@ -8,50 +8,15 @@ import sys
 from PySide6.QtCore import QByteArray, QProcess, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QApplication, QCheckBox, QComboBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from .core import Job, filename_component, profile_name, read_links
 from . import __version__
 from .progress import DownloadProgress
-from .settings import AppConfig, AppState, CONFIG_DIR, Settings
-
-
-class SettingsDialog(QDialog):
-    def __init__(self, settings, parent):
-        super().__init__(parent)
-        self.setWindowTitle("Settings")
-        self.setMinimumWidth(460)
-        self.values = settings
-        layout = QFormLayout(self)
-        self.config_path = QLineEdit(str(parent.preferences.config_path))
-        self.config_path.setReadOnly(True)
-        layout.addRow("User config path", self.config_path)
-        self.state_path = QLineEdit(str(parent.preferences.state_path))
-        self.state_path.setReadOnly(True)
-        layout.addRow("Saved state path", self.state_path)
-        open_config = QPushButton("Open config &folder")
-        open_config.clicked.connect(lambda: QDesktopServices.openUrl(
-            QUrl.fromLocalFile(str(parent.preferences.config_path.parent))))
-        layout.addRow(open_config)
-        self.browser = QComboBox()
-        self.browser.addItems(["system", "chromium", "chrome", "msedge", "firefox"])
-        self.browser.setCurrentText(settings.browser)
-        layout.addRow("&Browser", self.browser)
-        self.executable = QLineEdit(settings.executable)
-        self.executable.setPlaceholderText("Optional custom browser executable, e.g. Brave")
-        layout.addRow("&Executable", self.executable)
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addRow(buttons)
-
-    def settings(self):
-        return AppConfig.model_validate(self.values.model_dump() | {
-            "browser": self.browser.currentText(), "executable": self.executable.text(),
-        })
+from .settings import AppState, CONFIG_DIR, Settings
 
 
 class MainWindow(QMainWindow):
@@ -96,6 +61,14 @@ class MainWindow(QMainWindow):
         title_font.setBold(True)
         title.setFont(title_font)
         layout.addWidget(title)
+        self.tabs = QTabWidget()
+        self.download_tab = QWidget()
+        self.settings_tab = QWidget()
+        self.tabs.addTab(self.download_tab, "Download")
+        self.tabs.addTab(self.settings_tab, "Settings")
+        layout.addWidget(self.tabs, 1)
+        layout = QVBoxLayout(self.download_tab)
+        layout.setSpacing(12)
         self.inputs = QWidget()
         form = QFormLayout(self.inputs)
         form.setContentsMargins(0, 8, 0, 8)
@@ -156,9 +129,6 @@ class MainWindow(QMainWindow):
             self.checks[key] = check
             options.addWidget(check)
         options.addStretch()
-        self.save_settings_button = QPushButton("Save se&ttings")
-        self.save_settings_button.clicked.connect(self.save_config)
-        options.addWidget(self.save_settings_button)
         open_folder = QPushButton("Open &Downloads")
         open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.destination.text())))
         options.addWidget(open_folder)
@@ -209,12 +179,38 @@ class MainWindow(QMainWindow):
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
         self.statusBar().showMessage("Ready")
-        menu = self.menuBar().addMenu("&File")
-        self.settings_action = menu.addAction("&Settings…", self.edit_settings)
-        self.save_config_action = menu.addAction("&Save config", self.save_config)
-        self.reset_action = menu.addAction("Restore &Defaults", self.reset_defaults)
-        menu.addSeparator()
-        menu.addAction("E&xit", self.close)
+        settings_layout = QVBoxLayout(self.settings_tab)
+        settings_form = QFormLayout()
+        self.browser = QComboBox()
+        self.browser.addItems(["system", "chromium", "chrome", "msedge", "firefox"])
+        self.browser.setCurrentText(self.settings.browser)
+        self.browser.currentTextChanged.connect(lambda value: self.update_option("browser", value))
+        settings_form.addRow("&Browser", self.browser)
+        self.executable = QLineEdit(self.settings.executable)
+        self.executable.setPlaceholderText("Optional custom browser executable, e.g. Brave")
+        self.executable.textChanged.connect(lambda value: self.update_option("executable", value))
+        settings_form.addRow("&Executable", self.executable)
+        self.config_path = QLineEdit(str(self.preferences.config_path))
+        self.config_path.setReadOnly(True)
+        settings_form.addRow("User config path", self.config_path)
+        self.state_path = QLineEdit(str(self.preferences.state_path))
+        self.state_path.setReadOnly(True)
+        settings_form.addRow("Saved state path", self.state_path)
+        open_config = QPushButton("Open config &folder")
+        open_config.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(self.preferences.config_path.parent))))
+        settings_form.addRow("", open_config)
+        settings_layout.addLayout(settings_form)
+        settings_actions = QHBoxLayout()
+        self.save_settings_button = QPushButton("&Save Settings")
+        self.save_settings_button.clicked.connect(self.save_config)
+        self.restore_defaults_button = QPushButton("Restore &Defaults")
+        self.restore_defaults_button.clicked.connect(self.reset_defaults)
+        settings_actions.addWidget(self.save_settings_button)
+        settings_actions.addWidget(self.restore_defaults_button)
+        settings_actions.addStretch()
+        settings_layout.addLayout(settings_actions)
+        settings_layout.addStretch()
 
     def load_profile_list(self):
         self.profiles = read_links(self.profile_list.text())
@@ -230,13 +226,6 @@ class MainWindow(QMainWindow):
         path = QFileDialog.getExistingDirectory(self, "Download folder", self.destination.text())
         if path:
             self.destination.setText(path)
-
-    def edit_settings(self):
-        dialog = SettingsDialog(self.settings, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.settings = dialog.settings()
-            self.preferences.save_config(**self.settings.model_dump(exclude=set(AppState.model_fields)))
-            self.settings = self.preferences.values
 
     def current_state(self):
         return AppState(source=self.source.text(), folder=self.destination.text(),
@@ -256,6 +245,8 @@ class MainWindow(QMainWindow):
     def apply_settings(self):
         self.source.setText(self.settings.source)
         self.destination.setText(self.settings.folder)
+        self.browser.setCurrentText(self.settings.browser)
+        self.executable.setText(self.settings.executable)
         for name, check in self.checks.items():
             check.setChecked(getattr(self.settings, name))
         if self.settings.window_geometry:
@@ -269,7 +260,7 @@ class MainWindow(QMainWindow):
         self.preferences.reset_state()
         self.settings = self.preferences.values
         self.apply_settings()
-        self.statusBar().showMessage("Defaults restored. Click Save config to keep these values.")
+        self.statusBar().showMessage("Defaults restored. Click Save Settings to keep these values.")
 
     def start_download(self):
         settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
@@ -327,8 +318,7 @@ class MainWindow(QMainWindow):
     def set_busy(self, busy):
         self.inputs.setEnabled(not busy)
         self.download.setEnabled(not busy)
-        self.settings_action.setEnabled(not busy)
-        self.reset_action.setEnabled(not busy)
+        self.settings_tab.setEnabled(not busy)
         self.pause.setEnabled(busy)
         self.stop.setEnabled(busy)
 
