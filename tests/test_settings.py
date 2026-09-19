@@ -2,7 +2,8 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from PySide6.QtWidgets import QDialog
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QCheckBox, QDialog
 
 from tiktok_downloader.app import MainWindow, SettingsDialog
 from tiktok_downloader.settings import AppConfig, AppState, Settings
@@ -36,12 +37,10 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     window.resize(960, 720)
     window.settings.browser = "firefox"
     window.settings.executable = "custom-browser"
-    window.settings.images_only = True
-    window.settings.json_logs = True
-    window.settings.download_logs = True
-    window.settings.notifications = True
+    for check in window.checks.values():
+        check.setChecked(True)
     assert not window.preferences.state_path.exists()
-    window.save_config_action.trigger()
+    qtbot.mouseClick(window.save_settings_button, Qt.MouseButton.LeftButton)
     saved_config = window.preferences.config_path.read_bytes()
     saved_state = window.preferences.state_path.read_bytes()
     restored = MainWindow(tmp_path)
@@ -51,8 +50,10 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     assert restored.destination.text() == str(tmp_path / "downloads")
     assert restored.size() == window.size()
     assert restored.settings == window.settings
+    assert all(check.isChecked() for check in restored.checks.values())
     restored.reset_action.trigger()
     assert restored.settings == AppConfig()
+    assert not any(check.isChecked() for check in restored.checks.values())
     assert restored.source.text() == ""
     assert restored.size().width() == 840
     restored.close()
@@ -72,10 +73,11 @@ def test_settings_dialog_save_cancel_and_paths(qtbot, tmp_path, monkeypatch):
     assert dialog.config_path.text() == str(tmp_path / "config.json")
     assert dialog.state_path.text() == str(tmp_path / "state.json")
     assert dialog.config_path.isReadOnly()
+    assert not dialog.findChildren(QCheckBox)
+    window.checks["notifications"].setChecked(True)
 
     def accept(dialog):
         dialog.browser.setCurrentText("msedge")
-        dialog.checks["notifications"].setChecked(True)
         return QDialog.DialogCode.Accepted
 
     monkeypatch.setattr(SettingsDialog, "exec", accept)

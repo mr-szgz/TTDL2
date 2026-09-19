@@ -6,11 +6,11 @@ import subprocess
 import sys
 
 from PySide6.QtCore import QByteArray, QProcess, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
 from .core import Job, filename_component, profile_name, read_links
@@ -43,13 +43,6 @@ class SettingsDialog(QDialog):
         self.executable = QLineEdit(settings.executable)
         self.executable.setPlaceholderText("Optional custom browser executable, e.g. Brave")
         layout.addRow("&Executable", self.executable)
-        self.checks = {}
-        for key, title in [("images_only", "Images only"), ("json_logs", "Save API JSON"),
-                           ("download_logs", "Save download log"), ("notifications", "Alert on completion")]:
-            check = QCheckBox(title)
-            check.setChecked(getattr(settings, key))
-            self.checks[key] = check
-            layout.addRow(check)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
@@ -58,7 +51,6 @@ class SettingsDialog(QDialog):
     def settings(self):
         return AppConfig.model_validate(self.values.model_dump() | {
             "browser": self.browser.currentText(), "executable": self.executable.text(),
-            **{name: check.isChecked() for name, check in self.checks.items()},
         })
 
 
@@ -88,6 +80,7 @@ class MainWindow(QMainWindow):
         self.status_timer.setInterval(1000)
         self.status_timer.timeout.connect(self.show_work_status)
         self.setWindowTitle(f"ttdl2 - v{__version__}")
+        self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "purple" / "ttdl2-icon-purple.ico")))
         self.resize(840, 660)
         self.setMinimumSize(500, 480)
         if self.settings.window_geometry:
@@ -129,6 +122,20 @@ class MainWindow(QMainWindow):
         destination_label = QLabel("&Save to")
         destination_label.setBuddy(self.destination)
         form.addRow(destination_label, destination_row)
+        options = QHBoxLayout()
+        self.checks = {}
+        for key, title in [("images_only", "Images only"), ("json_logs", "Save API JSON"),
+                           ("download_logs", "Save download log"), ("notifications", "Alert on completion")]:
+            check = QCheckBox(title)
+            check.setChecked(getattr(self.settings, key))
+            check.toggled.connect(lambda checked, name=key: self.update_option(name, checked))
+            self.checks[key] = check
+            options.addWidget(check)
+        options.addStretch()
+        self.save_settings_button = QPushButton("Save se&ttings")
+        self.save_settings_button.clicked.connect(self.save_config)
+        options.addWidget(self.save_settings_button)
+        form.addRow(options)
         layout.addWidget(self.inputs)
         actions = QHBoxLayout()
         self.download = QPushButton("Setup &Browser")
@@ -184,7 +191,6 @@ class MainWindow(QMainWindow):
         self.reset_action = menu.addAction("Restore &Defaults", self.reset_defaults)
         menu.addSeparator()
         menu.addAction("E&xit", self.close)
-        self.menuBar().addMenu("&Help").addAction("&About", self.about)
 
     def choose_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Download folder", self.destination.text())
@@ -202,6 +208,11 @@ class MainWindow(QMainWindow):
         return AppState(source=self.source.text(), folder=self.destination.text(),
                         window_geometry=bytes(self.saveGeometry().toHex()).decode("ascii"))
 
+    def update_option(self, name, checked):
+        setattr(self.settings, name, checked)
+        if self.scanned_job is not None and name != "notifications":
+            setattr(self.scanned_job, name, checked)
+
     def save_config(self):
         self.preferences.save_config(**self.settings.model_dump(exclude=set(AppState.model_fields)))
         self.preferences.save_state(self.current_state())
@@ -211,6 +222,8 @@ class MainWindow(QMainWindow):
     def apply_settings(self):
         self.source.setText(self.settings.source)
         self.destination.setText(self.settings.folder)
+        for name, check in self.checks.items():
+            check.setChecked(getattr(self.settings, name))
         if self.settings.window_geometry:
             self.restoreGeometry(QByteArray.fromHex(self.settings.window_geometry.encode("ascii")))
         else:
@@ -223,9 +236,6 @@ class MainWindow(QMainWindow):
         self.settings = self.preferences.values
         self.apply_settings()
         self.statusBar().showMessage("Defaults restored. Click Save config to keep these values.")
-
-    def about(self):
-        QMessageBox.about(self, "About TikTok Downloader 2", f"TikTok Downloader {__version__}\nPython · PySide6 · Playwright\n\nBased on TikTok Downloader\n© 2024 Jettcodey · MIT License")
 
     def start_download(self):
         settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})

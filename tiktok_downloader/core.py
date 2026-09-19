@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import threading
 from time import monotonic
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 import requests
 from playwright.sync_api import sync_playwright
 
@@ -47,14 +47,14 @@ class Control:
         return not self.stopped.is_set()
 
 def post_parts(url):
-    return re.fullmatch(r"/@([^/]+)/(video|photo)/(\d+)/?", urlsplit(url).path).groups()
+    return re.fullmatch(r"/@([^/]+)/(video|photo)/(\d+)/?", unquote(urlsplit(url).path)).groups()
 
 def filename_component(value):
-    return "".join(c if c.isascii() and (c.isalnum() or c in "_-")
+    return "".join(c if c.isascii() and (c.isalnum() or c in "_.-")
                    else f"%{ord(c):X}" for c in str(value))
 
 def profile_name(source):
-    return (urlsplit(source).path if "://" in source else source).strip("/@")
+    return unquote(urlsplit(source).path if "://" in source else source).strip("/@")
 
 def read_links(path):
     return [line.strip() for line in Path(path).read_text(encoding="utf-8-sig").splitlines() if line.strip()]
@@ -116,7 +116,7 @@ class Downloader:
                 for kind in ("video", "photo"):
                     for link in page.locator(f'a[href*="/{kind}/"]').evaluate_all("nodes => nodes.map(n => n.href)"):
                         parsed = urlsplit(link)
-                        if re.fullmatch(rf"/@{re.escape(username)}/{kind}/\d+/?", parsed.path):
+                        if re.fullmatch(rf"/@{re.escape(username)}/{kind}/\d+/?", unquote(parsed.path)):
                             canonical = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
                             if canonical not in indexed[kind]:
                                 indexed[kind].append(canonical)

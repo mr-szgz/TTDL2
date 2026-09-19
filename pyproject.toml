@@ -7,7 +7,7 @@ name = "ttdl2"
 version = "2.1.0"
 readme = "README.md"
 license = "MIT"
-license-files = ["LICENSE.txt"]
+license-files = ["LICENSE"]
 description = "TikTok Downloader, second edition: Python, Qt and Playwright"
 requires-python = ">=3.12"
 dependencies = ["PySide6>=6.8,<7", "playwright>=1.51,<2", "platformdirs>=4", "pydantic>=2,<3", "requests>=2.32,<3"]
@@ -20,6 +20,9 @@ ttdl2 = "tiktok_downloader.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tiktok_downloader"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"assets/purple/ttdl2-icon-purple.ico" = "assets/purple/ttdl2-icon-purple.ico"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

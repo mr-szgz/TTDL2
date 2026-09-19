@@ -86,7 +86,10 @@ def test_original_hd_provider_failure_is_not_replaced(path, error, job_factory, 
 def test_parsing(tmp_path):
     assert post_parts("https://www.tiktok.com/@a.b/photo/123/?x=1") == ("a.b", "photo", "123")
     assert profile_name("https://www.tiktok.com/@a.b/?lang=en") == "a.b"
-    assert filename_component("../../name") == "%2E%2E%2F%2E%2E%2Fname"
+    assert post_parts("https://www.tiktok.com/@ayvah%2Enizzari/photo/123") == ("ayvah.nizzari", "photo", "123")
+    assert profile_name("https://www.tiktok.com/@ayvah%2Enizzari/") == "ayvah.nizzari"
+    assert filename_component("ayvah.nizzari") == "ayvah.nizzari"
+    assert filename_component("../../name") == "..%2F..%2Fname"
     with pytest.raises(FileNotFoundError):
         read_links(tmp_path / "missing.txt")
 
@@ -111,7 +114,7 @@ def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
             if self.path.startswith("/api/"):
                 metadata_times.append(monotonic())
                 origin = f"http://127.0.0.1:{self.server.server_port}"
-                body = json.dumps({"data": {"author": {"unique_id": "alice"},
+                body = json.dumps({"data": {"author": {"unique_id": "ayvah.nizzari"},
                     "hdplay": origin + "/video", "images": [origin + "/1", origin + "/2"]}}).encode()
             else:
                 body = payload
@@ -124,11 +127,12 @@ def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
         thread = threading.Thread(target=http.serve_forever, daemon=True)
         thread.start()
         origin = f"http://127.0.0.1:{http.server_port}"
-        job = Job(source="@alice", folder=str(tmp_path), hd_api=origin + "/api/")
+        job = Job(source="@ayvah.nizzari", folder=str(tmp_path), hd_api=origin + "/api/")
         events = []
         started = monotonic()
         Downloader(job, events.append, Control()).run([
-            origin + "/@alice/video/123", origin + "/@alice/photo/456"])
+            origin + "/@ayvah%2Enizzari/video/123", origin + "/@ayvah%2Enizzari/photo/456"])
+        Downloader(job, events.append, Control()).run([origin + "/@ayvah%2Enizzari/video/123"])
         elapsed = monotonic() - started
         http.shutdown()
         thread.join()
@@ -137,7 +141,7 @@ def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
     assert len(set(connections)) == 1
     assert metadata_times[1] - metadata_times[0] >= 1.0
     assert elapsed < 3  # The old 1.9-second delay alone took 5.7 seconds.
-    assert (tmp_path / "alice" / "video" / "123_HD.mp4").read_bytes() == payload
+    assert (tmp_path / "ayvah.nizzari" / "video" / "123_HD.mp4").read_bytes() == payload
     for i in (1, 2):
-        assert (tmp_path / "alice" / "photo" / f"456_{i}.jpg").read_bytes() == payload
+        assert (tmp_path / "ayvah.nizzari" / "photo" / f"456_{i}.jpg").read_bytes() == payload
     assert sum(event["bytes"] for event in events if event["type"] == "transfer") == 3 * len(payload)

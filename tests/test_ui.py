@@ -16,7 +16,7 @@ def window(qtbot, tmp_path):
 
 def test_hd_mass_only_screen(window, qtbot):
     assert not window.findChildren(QComboBox)
-    assert window.findChildren(QCheckBox) == [window.auto_download]
+    assert window.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
     assert window.auto_download.isChecked()
     assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
     assert window.auto_download.geometry().top() > window.download.geometry().bottom()

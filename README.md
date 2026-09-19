@@ -1,10 +1,17 @@
-# TikTok Downloader 2
+<img src="assets/purple/ttdl2-text-purple.png" alt="TTDL 2" width="480" style="max-width: 100%; height: auto;">
 
-Python / Qt edition, scoped to **HD mass download by TikTok profile, without watermarks**.
+# TTDL 2
+
+TikTok Downloader 2 is a Python / Qt app for **HD mass download by TikTok profile, without watermarks**.
 
 ## Run
 
-Double-click `launch.cmd`. Setup from this directory:
+On Windows x64, run `TTDL2-<version>-windows-x64-Setup.exe`, then open **TTDL 2**
+from the Start menu. Setup installs for the current user, creates a private Python
+environment, and downloads dependencies and Chromium. Internet access is required
+during setup. It also offers an optional desktop shortcut.
+
+For a source checkout, double-click `launch.cmd` after setting up this directory:
 
 ```powershell
 uv sync --extra test
@@ -75,12 +82,12 @@ Live verification on 2026-09-18 opened the requested profile
 and saved HD video `7567041710119800086_HD.mp4` (752,298 bytes) through the download routine.
 This verifies a real download, not every post's continuing availability.
 
-Original application © 2024 Jettcodey; MIT notice retained in `LICENSE.txt`.
+Original application © 2024 Jettcodey; MIT notice retained in `LICENSE`.
 The C# source remains untouched.
 
 ## Build a release
 
-On Windows, install PowerShell 7.4+ and uv, then run `build.cmd` or:
+On Windows x64, install PowerShell 7.4+, uv, and Inno Setup 6, then run `build.cmd` or:
 
 ```powershell
 pwsh -NoProfile -File scripts/build.ps1
@@ -88,8 +95,24 @@ pwsh -NoProfile -File scripts/build.ps1
 
 The script installs locked dependencies and Chromium, runs the tests, builds the
 wheel and source archive, and tests the installed wheel in a separate environment
-outside the source checkout. Artifacts and `SHA256SUMS.txt` are written to
-`dist/<version>/`. These are Python packages; Python 3.12+ is required.
+outside the source checkout. It also builds a Windows setup installer.
+Artifacts and `SHA256SUMS.txt` are written to `dist/<version>/`.
+The installer downloads its runtime; the Python packages require Python 3.12+.
+
+To build just the setup installer, run `build-setup.cmd` or:
+
+```powershell
+pwsh -NoProfile -File scripts/build-setup.ps1
+```
+
+The setup build follows the YOLO Media Organizer and Spectra installer pattern.
+It packages the app source, icon, lockfile, and uv 0.11.11. During setup, uv installs
+Python 3.12.10 and the locked dependencies into a private environment under the
+installation directory, then Playwright downloads Chromium into its per-user cache.
+The purple ICO is used for the app, installer, shortcuts, and uninstall entry.
+Uninstall removes the private runtime while preserving user settings and downloads.
+Inno Setup defaults to `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe`; pass
+`-IsccPath "C:\path\to\ISCC.exe"` to `build-setup.cmd` for another installation.
 
 To install a downloaded wheel into a virtual environment:
 
@@ -103,5 +126,5 @@ python -m venv .venv
 See [CHANGELOG.md](CHANGELOG.md) for release changes. Before a release, update the
 version in `pyproject.toml` and `tiktok_downloader/__init__.py`, run `uv lock`, and
 add a dated changelog entry. Run the build script, commit the release, push its
-annotated version tag, and publish the wheel, source archive, and checksum file
+annotated version tag, and publish the installer, wheel, source archive, and checksum file
 with `gh release create --verify-tag --notes-file` using the changelog entry.

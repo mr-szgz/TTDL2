@@ -26,7 +26,9 @@ Set-Location -LiteralPath $verifyDirectory
 Set-Location -LiteralPath $projectRoot
 
 $sourceArchive = Join-Path $releaseDirectory "ttdl2-$version.tar.gz"
-Get-FileHash -Algorithm SHA256 -LiteralPath $wheel, $sourceArchive |
+& pwsh -NoProfile -File (Join-Path $PSScriptRoot 'build-setup.ps1')
+$installer = Join-Path $releaseDirectory "TTDL2-$version-windows-x64-Setup.exe"
+Get-FileHash -Algorithm SHA256 -LiteralPath $wheel, $sourceArchive, $installer |
     ForEach-Object { '{0}  {1}' -f $_.Hash.ToLowerInvariant(), (Split-Path -Leaf $_.Path) } |
     Set-Content -LiteralPath (Join-Path $releaseDirectory 'SHA256SUMS.txt') -Encoding ascii
 Write-Output "Release artifacts verified: $releaseDirectory"
