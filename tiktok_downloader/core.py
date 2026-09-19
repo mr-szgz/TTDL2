@@ -108,9 +108,10 @@ class Downloader:
                 session.detach()
                 self.log("Browser minimized. Indexing in the background — 0 total results indexed.")
             indexed = {"video": [], "photo": []}
-            page_number = 1
+            total = 0
             last_page = False
             while self.control.checkpoint():
+                previous_total = total
                 for kind in ("video", "photo"):
                     for link in page.locator(f'a[href*="/{kind}/"]').evaluate_all("nodes => nodes.map(n => n.href)"):
                         parsed = urlsplit(link)
@@ -119,14 +120,13 @@ class Downloader:
                             if canonical not in indexed[kind]:
                                 indexed[kind].append(canonical)
                 total = len(indexed["video"]) + len(indexed["photo"])
-                self.emit({"type": "indexing", "page": page_number, "total": total})
+                self.emit({"type": "indexing", "total": total, "added": total - previous_total})
                 if last_page:
                     break
                 height = page.evaluate("document.body.scrollHeight")
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 page.wait_for_timeout(job.scroll_ms)
                 last_page = height == page.evaluate("document.body.scrollHeight")
-                page_number += 1
             links = indexed["video"] + indexed["photo"]
             context.close()
             browser.close()

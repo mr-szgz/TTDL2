@@ -1,6 +1,6 @@
 from pathlib import Path
 import pytest
-from PySide6.QtCore import QProcess, Qt
+from PySide6.QtCore import QBuffer, QIODevice, QProcess, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel
 from tiktok_downloader.app import MainWindow, SettingsDialog
 from tiktok_downloader.settings import AppConfig, Settings
@@ -56,6 +56,29 @@ def test_open_browser_click_uses_hd_mass_job(window, qtbot, monkeypatch, tmp_pat
     assert not hasattr(jobs[0], "watermark")
     assert not hasattr(jobs[0], "mode")
 
+def test_indexing_events_without_page(window, monkeypatch):
+    events = QBuffer()
+    events.setData(
+        b'{"type":"indexing","total":1,"added":1}\n'
+        b'{"type":"indexing","total":1,"added":0}\n'
+        b'{"type":"scanned","links":["https://www.tiktok.com/@alice/video/123"]}\n'
+        b'{"type":"done","stopped":false}\n'
+    )
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
+    monkeypatch.setattr(window.process, "readLine", events.readLine)
+
+    window.read_events()
+
+    assert window.log.toPlainText().splitlines() == [
+        "Indexed 1 unique posts — 1 new posts found",
+        "Indexed 1 unique posts — 0 new posts found",
+    ]
+    assert window.statusBar().currentMessage() == "Indexed 1 unique posts — 0 new posts found"
+    assert window.scanned_links == ["https://www.tiktok.com/@alice/video/123"]
+    assert window.completed
+
+
 def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory, server):
     statuses = []
     window.statusBar().messageChanged.connect(statuses.append)
@@ -90,8 +113,8 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     assert (Path(job.folder) / "alice" / "Videos" / "123_HD.mp4").exists()
     assert window.download.isEnabled()
     assert not window.start_indexing.isEnabled()
-    assert "Indexing page 1 — 1 total results" in statuses
-    assert "Indexing page 2 — 2 total results" in statuses
+    assert "Indexed 1 unique posts — 1 new posts found" in statuses
+    assert "Indexed 2 unique posts — 1 new posts found" in statuses
     assert "Downloading (1/2) — 0.00 items/sec — ETA calculating…" in statuses
     assert any(message.startswith("Downloading (2/2) — ") and "items/sec — ETA" in message for message in statuses)
     assert not window.status_timer.isActive()

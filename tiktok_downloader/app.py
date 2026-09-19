@@ -260,6 +260,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"No saved scan found: {path}")
 
     def start_job(self, job, links=None):
+        self.save_config()
         self.status_timer.stop()
         self.download_progress = None
         self.scanning = links is None
@@ -303,6 +304,7 @@ class MainWindow(QMainWindow):
         self.show_work_status()
 
     def begin_indexing(self):
+        self.save_config()
         self.start_indexing.setEnabled(False)
         self.paused = False
         self.process.write(b"resume\n")
@@ -337,7 +339,7 @@ class MainWindow(QMainWindow):
             elif event["type"] == "scanned":
                 self.scanned_links = event["links"]
             elif event["type"] == "indexing":
-                self.work_status = f"Indexing page {event['page']} — {event['total']} total results"
+                self.work_status = f"Indexed {event['total']} unique posts — {event['added']} new posts found"
                 self.log.appendPlainText(self.work_status)
                 self.show_work_status()
             elif event["type"] == "downloading":

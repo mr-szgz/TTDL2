@@ -20,8 +20,8 @@ def test_hd_mass_download(job_factory, server):
     assert (root / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
     assert events[-1] == {"type": "done", "stopped": False}
     indexing = [event for event in events if event["type"] == "indexing"]
-    assert indexing[0] == {"type": "indexing", "page": 1, "total": 1}
-    assert indexing[-1] == {"type": "indexing", "page": 2, "total": 2}
+    assert indexing[0] == {"type": "indexing", "total": 1, "added": 1}
+    assert indexing[-1] == {"type": "indexing", "total": 2, "added": 1}
     assert [event for event in events if event["type"] == "downloading"] == [
         {"type": "downloading", "current": 1, "total": 2},
         {"type": "downloading", "current": 2, "total": 2},
