@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 import threading
-from urllib.error import HTTPError
+from requests.exceptions import HTTPError
 import pytest
 from tiktok_downloader.core import Control, Downloader, filename_component, post_parts, profile_name, read_links
 
@@ -89,3 +89,55 @@ def test_parsing(tmp_path):
     assert filename_component("../../name") == "%2E%2E%2F%2E%2E%2Fname"
     with pytest.raises(FileNotFoundError):
         read_links(tmp_path / "missing.txt")
+
+
+def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from time import monotonic
+    from tiktok_downloader.core import Job
+
+    connections = []
+    metadata_times = []
+    payload = b"media-bytes" * 30000
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            connections.append(self.client_address)
+            if self.path.startswith("/api/"):
+                metadata_times.append(monotonic())
+                origin = f"http://127.0.0.1:{self.server.server_port}"
+                body = json.dumps({"data": {"author": {"unique_id": "alice"},
+                    "hdplay": origin + "/video", "images": [origin + "/1", origin + "/2"]}}).encode()
+            else:
+                body = payload
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as http:
+        thread = threading.Thread(target=http.serve_forever, daemon=True)
+        thread.start()
+        origin = f"http://127.0.0.1:{http.server_port}"
+        job = Job(source="@alice", folder=str(tmp_path), hd_api=origin + "/api/")
+        events = []
+        started = monotonic()
+        Downloader(job, events.append, Control()).run([
+            origin + "/@alice/video/123", origin + "/@alice/photo/456"])
+        elapsed = monotonic() - started
+        http.shutdown()
+        thread.join()
+
+    assert len(connections) == 5
+    assert len(set(connections)) == 1
+    assert metadata_times[1] - metadata_times[0] >= 1.0
+    assert elapsed < 3  # The old 1.9-second delay alone took 5.7 seconds.
+    assert (tmp_path / "alice" / "Videos" / "123_HD.mp4").read_bytes() == payload
+    for i in (1, 2):
+        assert (tmp_path / "alice" / "Images" / f"456_{i}.jpg").read_bytes() == payload
+    assert sum(event["bytes"] for event in events if event["type"] == "transfer") == 3 * len(payload)

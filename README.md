@@ -33,15 +33,25 @@ and click **Restore Scan**, uncheck **Automatically download videos**, then clic
 The app uses native Qt widgets, fonts, colors and appearance. There are no custom
 stylesheets or themes. There are no single-download, standard-quality or watermark modes.
 
-Pause and Stop work between streamed 8 KiB chunks. An active network read can wait
-up to its 120-second timeout. Stopping before indexing preserves any previously
-saved links file. Partial downloads use `.part` and become final files only on completion.
+**Cancel / Reset**, beside **Scan Profile**, cancels browser setup, scanning, or
+downloading immediately by terminating the worker and its browser process tree.
+It clears the session, scan results, progress, and log, and enables **Setup Browser**
+again. Profile and folder inputs, saved scans, and downloaded files are preserved.
+Closing the app also cancels its active operation and closes its browser.
+
+Pause and Stop work between streamed 64 KiB chunks. An active network read can wait
+up to its 120-second timeout; **Cancel / Reset** interrupts that wait.
+Partial downloads use `.part` and become final files only on completion.
 
 Files use `username/Videos/id_HD.mp4` and `username/Images/id_1.jpg`.
 Existing final videos skip the metadata request as well as the transfer.
 The provider's `hdplay` URL is used; `wmplay` is never used.
 Requests identify this app with `User-Agent: TikTokDownloader2/2.0`.
-The original 1.9-second delay before media transfers is retained.
+Downloads reuse HTTP connections across the batch and have no fixed per-file delay.
+TikWM limits metadata requests to one per second. Only metadata calls are paced;
+time spent transferring files counts toward that interval. Carousel photos download
+consecutively without a pacing delay.
+The 10-second browser scrolling interval applies only to profile scanning.
 
 Settings are stored separately under Qt's per-user AppConfigLocation.
 Chromium is the default; settings also allow an explicit installed browser.

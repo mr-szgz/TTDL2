@@ -5,8 +5,8 @@ from pathlib import Path
 import re
 import threading
 from time import monotonic
-from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlsplit
+import requests
 from playwright.sync_api import sync_playwright
 
 @dataclass
@@ -21,7 +21,6 @@ class Job:
     headless: bool = False
     manual_start: bool = True
     scroll_ms: int = 10000
-    transfer_delay_ms: int = 1900
     site: str = "https://www.tiktok.com"
     hd_api: str = "https://www.tikwm.com/api/"
 
@@ -72,6 +71,7 @@ def system_browser():
 class Downloader:
     def __init__(self, job, emit, control):
         self.job, self.emit, self.control = job, emit, control
+        self.metadata_ready_at = 0.0
 
     def log(self, message):
         self.emit({"type": "log", "message": message})
@@ -138,10 +138,11 @@ class Downloader:
             self.log(f"Indexing complete — {len(links)} total results. Saved URLs to {path}")
         return read_links(path)
 
-    def media(self, url):
+    def media(self, url, session):
         """Original HDMediaDownload: TikWM HD media after profile URL collection."""
         if urlsplit(url).hostname in ("vm.tiktok.com", "vt.tiktok.com") or "/t/" in urlsplit(url).path:
-            with urlopen(url, timeout=120) as response:
+            with session.get(url, timeout=120) as response:
+                response.raise_for_status()
                 url = response.url
         username, kind, media_id = post_parts(url)
         job = self.job
@@ -149,10 +150,16 @@ class Downloader:
         if kind == "video" and existing_video.exists():
             self.log(f"Already downloaded: {existing_video.name}")
             return True
-        request = Request(job.hd_api + "?" + urlencode({"url": media_id, "hd": "1"}),
-                          headers={"User-Agent": "TikTokDownloader2/2.0"})
-        with urlopen(request, timeout=120) as response:
-            raw = json.load(response)
+        # TikWM's free API permits one metadata request per second. Media transfers
+        # use that interval too; there is no delay between files in a photo set.
+        if self.control.stopped.wait(max(0, self.metadata_ready_at - monotonic())):
+            return False
+        if not self.control.checkpoint():
+            return False
+        with session.get(job.hd_api, params={"url": media_id, "hd": "1"}, timeout=120) as response:
+            response.raise_for_status()
+            raw = response.json()
+        self.metadata_ready_at = monotonic() + 1.0
         data = raw["data"]
         username = data["author"]["unique_id"]
         if kind == "photo":
@@ -177,14 +184,12 @@ class Downloader:
             destination.parent.mkdir(parents=True, exist_ok=True)
             self.log(f"Downloading {destination.name}")
             partial = destination.with_suffix(destination.suffix + ".part")
-            if self.control.stopped.wait(job.transfer_delay_ms / 1000):
-                return False
-            request = Request(asset_url, headers={"User-Agent": "TikTokDownloader2/2.0"})
-            with urlopen(request, timeout=120) as response, partial.open("wb") as file:
+            with session.get(asset_url, stream=True, timeout=120) as response, partial.open("wb") as file:
+                response.raise_for_status()
                 pending_bytes = 0
                 last_update = monotonic()
                 while self.control.checkpoint():
-                    chunk = response.read(8192)
+                    chunk = response.raw.read(65536)
                     if not chunk:
                         break
                     file.write(chunk)
@@ -215,11 +220,13 @@ class Downloader:
 
     def run(self, links):
         self.emit({"type": "progress", "current": 0, "total": len(links)})
-        for current, link in enumerate(links, 1):
-            if not self.control.checkpoint():
-                break
-            self.emit({"type": "downloading", "current": current, "total": len(links)})
-            if not self.media(link):
-                break
-            self.emit({"type": "progress", "current": current, "total": len(links)})
+        with requests.Session() as session:
+            session.headers.update({"User-Agent": "TikTokDownloader2/2.0", "Accept-Encoding": "identity"})
+            for current, link in enumerate(links, 1):
+                if not self.control.checkpoint():
+                    break
+                self.emit({"type": "downloading", "current": current, "total": len(links)})
+                if not self.media(link, session):
+                    break
+                self.emit({"type": "progress", "current": current, "total": len(links)})
         self.emit({"type": "done", "stopped": self.control.stopped.is_set()})

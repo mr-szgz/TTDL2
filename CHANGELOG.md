@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Removed the 1.9-second wait before every video and photo; reuse HTTP connections across each download batch and stream in 64 KiB chunks.
+- Pace only TikWM metadata calls to respect its one-request-per-second limit, counting file-transfer time toward the interval.
+- Added **Cancel / Reset** beside **Scan Profile** to interrupt browser setup, indexing, and downloads, close the browser process tree, and clear the session for another setup.
+- Closing the app now cancels the active operation and its browser instead of waiting for page or network timeouts.
+
 ## [2.1.0] - 2026-09-18
 
 ### Added

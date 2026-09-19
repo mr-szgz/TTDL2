@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+import subprocess
 import pytest
 from PySide6.QtCore import QBuffer, QIODevice, QProcess, Qt
 from PySide6.QtWidgets import QCheckBox, QComboBox, QLabel
@@ -22,6 +24,9 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.download.text() == "Setup &Browser"
     assert window.start_indexing.isVisible()
     assert window.start_indexing.text() == "&Scan Profile"
+    assert window.cancel_reset.text() == "&Cancel / Reset"
+    assert window.cancel_reset.isEnabled()
+    assert window.cancel_reset.geometry().top() == window.download.geometry().top()
     assert window.download_videos.text() == "&Download Videos"
     assert not window.download_videos.isEnabled()
     assert not window.start_indexing.isEnabled()
@@ -182,6 +187,140 @@ def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
     assert server[1]["/api/hd"] == 0
     assert existing.read_text() == "previously collected URLs"
 
+
+@pytest.mark.parametrize("stage", ["starting", "setup", "scanning"])
+def test_cancel_reset_closes_scan_and_allows_restart(window, qtbot, job_factory, server, stage):
+    job = job_factory(manual_start=True, headless=False, scroll_ms=10000)
+    existing = Path(job.folder) / "alice_combined_links.txt"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("previously collected URLs")
+    window.start_job(job)
+    if stage != "starting":
+        qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
+    if stage == "scanning":
+        qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
+        qtbot.waitUntil(lambda: server[1]["/indexing"] > 0, timeout=10000)
+    if stage == "setup":
+        command = ["powershell", "-NoProfile", "-Command",
+                   "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress"]
+        processes = json.loads(subprocess.check_output(command, creationflags=subprocess.CREATE_NO_WINDOW))
+        descendants = {window.process.processId()}
+        while children := {p["ProcessId"] for p in processes
+                           if p["ParentProcessId"] in descendants} - descendants:
+            descendants.update(children)
+        assert any(p["ProcessId"] in descendants and p["Name"] == "chrome.exe" for p in processes)
+    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: not window.resetting, timeout=5000)
+    assert window.process.state() == QProcess.ProcessState.NotRunning
+    assert window.statusBar().currentMessage() == "Ready"
+    assert window.scanned_links is None
+    assert window.scanned_job is None
+    assert window.download_progress is None
+    assert not window.status_timer.isActive()
+    assert not window.scanning
+    assert not window.paused
+    assert not window.start_indexing.isEnabled()
+    assert not window.download_videos.isEnabled()
+    assert not window.pause.isEnabled()
+    assert not window.stop.isEnabled()
+    assert window.download.isEnabled()
+    assert window.cancel_reset.isEnabled()
+    assert window.log.toPlainText() == ""
+    assert existing.read_text() == "previously collected URLs"
+    assert server[1]["/api/hd"] == 0
+    if stage == "setup":
+        remaining = json.loads(subprocess.check_output(command, creationflags=subprocess.CREATE_NO_WINDOW))
+        assert not descendants.intersection(p["ProcessId"] for p in remaining)
+    window.start_job(job)
+    qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
+    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: not window.resetting, timeout=5000)
+
+
+def test_reset_idle_clears_restored_scan_without_changing_inputs(window, qtbot, tmp_path):
+    window.source.setText("@alice")
+    window.destination.setText(str(tmp_path))
+    window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    window.auto_download.setChecked(False)
+    qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+    assert window.source.text() == "@alice"
+    assert window.destination.text() == str(tmp_path)
+    assert window.scanned_links is None
+    assert not window.download_videos.isEnabled()
+    assert window.statusBar().currentMessage() == "Ready"
+
+
+def test_cancel_discards_queued_scan_completion(window, monkeypatch):
+    events = QBuffer()
+    events.setData(b'{"type":"manual","message":"Ready"}\n'
+                   b'{"type":"scanned","links":["https://www.tiktok.com/@alice/video/123"]}\n'
+                   b'{"type":"done","stopped":false}\n')
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
+    monkeypatch.setattr(window.process, "readLine", events.readLine)
+    window.resetting = True
+    window.scanning = True
+    jobs = []
+    monkeypatch.setattr(window, "start_job", lambda *args: jobs.append(args))
+    window.process_finished(1, QProcess.ExitStatus.CrashExit)
+    assert jobs == []
+    assert window.scanned_links is None
+    assert window.statusBar().currentMessage() == "Ready"
+
+
+@pytest.mark.parametrize("action", ["reset", "close"])
+def test_cancel_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+    from tiktok_downloader.core import Job
+
+    transferring = threading.Event()
+    release = threading.Event()
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_):
+            pass
+
+        def do_GET(self):
+            if self.path.startswith("/api/"):
+                body = json.dumps({"data": {"author": {"unique_id": "alice"},
+                    "hdplay": f"http://127.0.0.1:{self.server.server_port}/media"}}).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            else:
+                self.send_response(200)
+                self.send_header("Content-Length", "1000000")
+                self.end_headers()
+                self.wfile.write(b"x" * 65536)
+                transferring.set()
+                release.wait(15)
+
+    with ThreadingHTTPServer(("127.0.0.1", 0), Handler) as http:
+        thread = threading.Thread(target=http.serve_forever, daemon=True)
+        thread.start()
+        origin = f"http://127.0.0.1:{http.server_port}"
+        job = Job(source="@alice", folder=str(tmp_path), hd_api=origin + "/api/")
+        window.start_job(job, [origin + "/@alice/video/123"])
+        partial = tmp_path / "alice" / "Videos" / "123_HD.mp4.part"
+        qtbot.waitUntil(lambda: transferring.is_set() and partial.exists() and partial.stat().st_size > 0,
+                        timeout=10000)
+        if action == "reset":
+            qtbot.mouseClick(window.cancel_reset, Qt.MouseButton.LeftButton)
+        else:
+            window.close()
+        qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning and not window.resetting,
+                        timeout=5000)
+        release.set()
+        http.shutdown()
+        thread.join()
+    assert partial.exists()
+    assert not partial.with_suffix("").exists()
+    assert window.statusBar().currentMessage() == "Ready"
+    if action == "close":
+        assert not window.isVisible()
+
 def test_worker_traceback(window, qtbot, job_factory, server):
     window.auto_download.setChecked(False)
     window.start_job(job_factory(hd_api=server[0] + "/unavailable"))
@@ -213,7 +352,6 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source):
     assert window.process.state() == QProcess.ProcessState.NotRunning
     assert sum(server[1].values()) == 0
     window.scanned_job.hd_api = server[0] + "/api/hd"
-    window.scanned_job.transfer_delay_ms = 0
     qtbot.mouseClick(window.download_videos, Qt.MouseButton.LeftButton)
     assert not window.restore_scan_button.isEnabled()
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
