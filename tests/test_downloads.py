@@ -1,0 +1,83 @@
+import json
+from pathlib import Path
+import threading
+from urllib.error import HTTPError
+import pytest
+from tiktok_downloader.core import Control, Downloader, filename_component, post_parts, profile_name, read_links
+
+def test_hd_mass_download(job_factory, server):
+    job = job_factory(json_logs=True, download_logs=True)
+    events = []
+    Downloader(job, events.append, Control()).run()
+    root = Path(job.folder) / "alice"
+    assert (root / "Videos" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
+    for i in (1, 2):
+        assert (root / "Images" / f"456_{i}.jpg").read_bytes() == f"fixture-media:/media/{i}.jpg".encode()
+    assert (Path(job.folder) / "alice_combined_links.txt").read_text().splitlines() == [
+        server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
+    assert (root / "123_HD.json").exists()
+    assert (root / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
+    assert events[-1] == {"type": "done", "stopped": False}
+    indexing = [event for event in events if event["type"] == "indexing"]
+    assert indexing[0] == {"type": "indexing", "page": 1, "total": 1}
+    assert indexing[-1] == {"type": "indexing", "page": 2, "total": 2}
+    assert [event for event in events if event["type"] == "downloading"] == [
+        {"type": "downloading", "current": 1, "total": 2},
+        {"type": "downloading", "current": 2, "total": 2},
+    ]
+    assert server[1]["/api/standard"] == 0
+    assert server[1]["/media/watermark.mp4"] == 0
+    assert server[1]["/@alice/video/123"] == 0
+    before = sum(v for k,v in server[1].items() if k.startswith("/media/"))
+    Downloader(job, events.append, Control()).run()
+    assert sum(v for k,v in server[1].items() if k.startswith("/media/")) == before
+
+def test_images_only(job_factory):
+    job = job_factory(images_only=True)
+    Downloader(job, lambda _: None, Control()).run()
+    assert not list(Path(job.folder).rglob("*.mp4"))
+    assert len(list(Path(job.folder).rglob("*.jpg"))) == 2
+
+def test_stop_during_download(job_factory):
+    job = job_factory()
+    control = Control()
+    events = []
+    def emit(event):
+        events.append(event)
+        if event["type"] == "log" and "/Videos/" in event["message"].replace("\\", "/") and event["message"].startswith("Saved"):
+            control.stop()
+    Downloader(job, emit, control).run()
+    assert events[-1] == {"type": "done", "stopped": True}
+    assert len(list(Path(job.folder).rglob("*.mp4"))) == 1
+    assert not list(Path(job.folder).rglob("*.jpg"))
+
+def test_pause_resume():
+    control = Control()
+    control.pause()
+    entered, done = threading.Event(), threading.Event()
+    def work():
+        entered.set()
+        control.checkpoint()
+        done.set()
+    thread = threading.Thread(target=work)
+    thread.start()
+    assert entered.wait(1)
+    assert not done.wait(0.1)
+    control.resume()
+    assert done.wait(1)
+    thread.join()
+
+@pytest.mark.parametrize("path,error", [("/unavailable", HTTPError), ("/bad-json", json.JSONDecodeError)])
+def test_original_hd_provider_failure_is_not_replaced(path, error, job_factory, server):
+    job = job_factory(hd_api=server[0] + path)
+    with pytest.raises(error):
+        Downloader(job, lambda _: None, Control()).run()
+    assert server[1][path] == 1
+    assert not list(Path(job.folder).rglob("*.mp4"))
+
+def test_parsing(tmp_path):
+    assert post_parts("https://www.tiktok.com/@a.b/photo/123/?x=1") == ("a.b", "photo", "123")
+    assert profile_name("https://www.tiktok.com/@a.b/?lang=en") == "a.b"
+    assert filename_component("../../name") == "%2E%2E%2F%2E%2E%2Fname"
+    with pytest.raises(FileNotFoundError):
+        read_links(tmp_path / "missing.txt")

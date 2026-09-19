@@ -1,0 +1,288 @@
+from dataclasses import asdict
+import codecs
+import json
+from pathlib import Path
+import sys
+
+from PySide6.QtCore import QProcess, QUrl
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+    QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget,
+)
+
+from .core import Job
+from .settings import Settings, load_settings, save_settings, settings_path
+
+
+class SettingsDialog(QDialog):
+    def __init__(self, settings, parent):
+        super().__init__(parent)
+        self.setWindowTitle("Settings")
+        self.setMinimumWidth(460)
+        self.folder = settings.folder
+        layout = QFormLayout(self)
+        self.browser = QComboBox()
+        self.browser.addItems(["system", "chromium", "chrome", "msedge", "firefox"])
+        self.browser.setCurrentText(settings.browser)
+        layout.addRow("&Browser", self.browser)
+        self.executable = QLineEdit(settings.executable)
+        self.executable.setPlaceholderText("Optional custom browser executable, e.g. Brave")
+        layout.addRow("&Executable", self.executable)
+        self.checks = {}
+        for key, title in [("images_only", "Images only"), ("json_logs", "Save API JSON"),
+                           ("download_logs", "Save download log"), ("notifications", "Alert on completion")]:
+            check = QCheckBox(title)
+            check.setChecked(getattr(settings, key))
+            self.checks[key] = check
+            layout.addRow(check)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def settings(self):
+        return Settings(folder=self.folder, browser=self.browser.currentText(),
+                        executable=self.executable.text(),
+                        **{name: check.isChecked() for name, check in self.checks.items()})
+
+
+class MainWindow(QMainWindow):
+    def __init__(self, config_path=None):
+        super().__init__()
+        self.config_path = config_path if config_path is not None else settings_path()
+        self.settings = load_settings(self.config_path)
+        self.process = QProcess(self)
+        self.stderr_decoder = codecs.getincrementaldecoder("utf-8")()
+        self.process.readyReadStandardOutput.connect(self.read_events)
+        self.process.readyReadStandardError.connect(self.read_errors)
+        self.process.finished.connect(self.process_finished)
+        self.process.errorOccurred.connect(lambda _: self.log.appendPlainText(self.process.errorString()))
+        self.paused = False
+        self.stopping = False
+        self.completed = False
+        self.work_status = "Ready"
+        self.setWindowTitle("TikTok Downloader 2")
+        self.resize(840, 660)
+        self.setMinimumSize(500, 480)
+        body = QWidget()
+        self.setCentralWidget(body)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+        title = QLabel("TikTok Downloader 2")
+        layout.addWidget(title)
+        layout.addWidget(QLabel("HD mass download"))
+        instructions = QLabel("Profile downloads: set up the browser session, then click Start indexing here.")
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+        self.inputs = QWidget()
+        form = QFormLayout(self.inputs)
+        form.setContentsMargins(0, 8, 0, 8)
+        source_row = QHBoxLayout()
+        self.source = QLineEdit()
+        self.source.setObjectName("source")
+        self.source.setAccessibleName("TikTok username or profile URL")
+        self.source.setPlaceholderText("@username or TikTok profile URL")
+        source_row.addWidget(self.source, 1)
+        source_label = QLabel("&Profile")
+        source_label.setBuddy(self.source)
+        form.addRow(source_label, source_row)
+        destination_row = QHBoxLayout()
+        self.destination = QLineEdit(self.settings.folder)
+        self.destination.setObjectName("destination")
+        self.destination.setAccessibleName("Download folder")
+        change = QPushButton("&Choose…")
+        change.clicked.connect(self.choose_folder)
+        destination_row.addWidget(self.destination, 1)
+        destination_row.addWidget(change)
+        destination_label = QLabel("&Save to")
+        destination_label.setBuddy(self.destination)
+        form.addRow(destination_label, destination_row)
+        layout.addWidget(self.inputs)
+        actions = QHBoxLayout()
+        self.download = QPushButton("Open &browser")
+        self.download.setObjectName("downloadButton")
+        self.download.clicked.connect(self.start_download)
+        self.start_indexing = QPushButton("&Start indexing")
+        self.start_indexing.setObjectName("startIndexingButton")
+        self.start_indexing.setEnabled(False)
+        self.start_indexing.clicked.connect(self.begin_indexing)
+        self.pause = QPushButton("&Pause")
+        self.pause.clicked.connect(self.toggle_pause)
+        self.stop = QPushButton("&Stop")
+        self.stop.clicked.connect(self.stop_download)
+        self.pause.setEnabled(False)
+        self.stop.setEnabled(False)
+        actions.addWidget(self.download)
+        actions.addWidget(self.start_indexing)
+        actions.addWidget(self.pause)
+        actions.addWidget(self.stop)
+        actions.addStretch()
+        open_folder = QPushButton("Open &folder")
+        open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.destination.text())))
+        actions.addWidget(open_folder)
+        layout.addLayout(actions)
+        self.progress = QProgressBar()
+        self.progress.setRange(0, 1)
+        self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        self.log = QPlainTextEdit()
+        self.log.setObjectName("activityLog")
+        self.log.setReadOnly(True)
+        layout.addWidget(self.log, 1)
+        self.statusBar().showMessage("Ready")
+        menu = self.menuBar().addMenu("&File")
+        self.settings_action = menu.addAction("&Settings…", self.edit_settings)
+        self.import_action = menu.addAction("&Import settings…", self.import_settings)
+        menu.addAction("&Export settings…", self.export_settings)
+        menu.addSeparator()
+        menu.addAction("E&xit", self.close)
+        self.menuBar().addMenu("&Help").addAction("&About", self.about)
+
+    def choose_folder(self):
+        path = QFileDialog.getExistingDirectory(self, "Download folder", self.destination.text())
+        if path:
+            self.destination.setText(path)
+
+    def edit_settings(self):
+        dialog = SettingsDialog(self.settings, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.settings = dialog.settings()
+            self.settings.folder = self.destination.text()
+            save_settings(self.settings, self.config_path)
+
+    def import_settings(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import settings", "", "JSON (*.json)")
+        if path:
+            self.settings = Settings(**json.loads(Path(path).read_text(encoding="utf-8")))
+            save_settings(self.settings, self.config_path)
+            self.destination.setText(self.settings.folder)
+
+    def export_settings(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export settings", "settings.json", "JSON (*.json)")
+        if path:
+            self.settings.folder = self.destination.text()
+            save_settings(self.settings, Path(path))
+
+    def about(self):
+        QMessageBox.about(self, "About TikTok Downloader 2", "TikTok Downloader 2.0.0\nPython · PySide6 · Playwright\n\nBased on TikTok Downloader\n© 2024 Jettcodey · MIT License")
+
+    def start_download(self):
+        self.settings.folder = self.destination.text()
+        save_settings(self.settings, self.config_path)
+        settings = asdict(self.settings)
+        del settings["notifications"]
+        self.start_job(Job(source=self.source.text(), **settings))
+
+    def start_job(self, job):
+        self.stderr_decoder.reset()
+        self.start_indexing.setEnabled(False)
+        self.completed = self.stopping = self.paused = False
+        self.work_status = "Opening browser"
+        self.pause.setText("&Pause")
+        self.log.clear()
+        self.progress.setRange(0, 0)
+        self.set_busy(True)
+        self.pause.setEnabled(False)
+        self.statusBar().showMessage("Opening browser")
+        self.process.setProgram(str(Path(sys.executable).with_name("python.exe")))
+        self.process.setArguments(["-u", "-m", "tiktok_downloader.worker"])
+        self.process.start()
+        self.process.write((json.dumps(asdict(job)) + "\n").encode())
+
+    def set_busy(self, busy):
+        self.inputs.setEnabled(not busy)
+        self.download.setEnabled(not busy)
+        self.settings_action.setEnabled(not busy)
+        self.import_action.setEnabled(not busy)
+        self.pause.setEnabled(busy)
+        self.stop.setEnabled(busy)
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+        self.process.write(b"pause\n" if self.paused else b"resume\n")
+        self.pause.setText("&Resume" if self.paused else "&Pause")
+        self.show_work_status()
+
+    def begin_indexing(self):
+        self.start_indexing.setEnabled(False)
+        self.paused = False
+        self.process.write(b"resume\n")
+        self.pause.setText("&Pause")
+        self.pause.setEnabled(True)
+        self.work_status = "Indexing profile — 0 total results"
+        self.show_work_status()
+
+    def stop_download(self):
+        self.stopping = True
+        self.start_indexing.setEnabled(False)
+        self.process.write(b"stop\n")
+        self.pause.setEnabled(False)
+        self.stop.setEnabled(False)
+        self.show_work_status()
+
+    def show_work_status(self):
+        prefix = "Stopping — " if self.stopping else "Paused — " if self.paused else ""
+        self.statusBar().showMessage(prefix + self.work_status)
+
+    def read_events(self):
+        while self.process.canReadLine():
+            event = json.loads(bytes(self.process.readLine()).decode())
+            if event["type"] in ("log", "manual"):
+                self.log.appendPlainText(event["message"])
+            if event["type"] == "manual":
+                self.paused = True
+                self.pause.setEnabled(False)
+                self.start_indexing.setEnabled(True)
+                self.statusBar().showMessage("Waiting for you to click Start indexing")
+            elif event["type"] == "indexing":
+                self.work_status = f"Indexing page {event['page']} — {event['total']} total results"
+                self.log.appendPlainText(self.work_status)
+                self.show_work_status()
+            elif event["type"] == "downloading":
+                self.work_status = f"Downloading ({event['current']}/{event['total']})"
+                self.show_work_status()
+            elif event["type"] == "progress":
+                self.progress.setRange(0, max(event["total"], 1))
+                self.progress.setValue(event["current"])
+                self.progress.setFormat(f"{event['current']} / {event['total']} posts")
+            elif event["type"] == "done":
+                self.completed = True
+                self.stopping = event["stopped"]
+
+    def read_errors(self):
+        text = self.stderr_decoder.decode(bytes(self.process.readAllStandardError()))
+        if text:
+            self.log.appendPlainText(text)
+
+    def process_finished(self, code, status):
+        self.read_events()
+        self.read_errors()
+        self.set_busy(False)
+        self.start_indexing.setEnabled(False)
+        if code != 0 or status == QProcess.ExitStatus.CrashExit:
+            self.statusBar().showMessage(f"Process exited with code {code}; see traceback above")
+        elif self.completed:
+            self.statusBar().showMessage("Stopped" if self.stopping else "Completed")
+            if self.settings.notifications and not self.stopping:
+                QApplication.alert(self)
+
+    def closeEvent(self, event):
+        if self.process.state() != QProcess.ProcessState.NotRunning:
+            self.stop_download()
+            event.ignore()
+        else:
+            self.settings.folder = self.destination.text()
+            save_settings(self.settings, self.config_path)
+            event.accept()
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setOrganizationName("TikTokDownloader2")
+    app.setApplicationName("TikTok Downloader 2")
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec())
