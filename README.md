@@ -11,7 +11,7 @@ Existing `*_combined_links.txt` files can be moved into that folder to restore t
 
 ## Install
 
-[Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.0.0/TTDL2-3.0.0-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)
+[Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.1.0/TTDL2-3.1.0-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)
 
 ### To run from source:
 

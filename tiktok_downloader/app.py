@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 from playwright.sync_api import sync_playwright
 
-from .core import Job, filename_component, profile_name, read_links, system_browser
+from .core import Job, profile_name, read_links, system_browser
 from . import __version__
 from .progress import DownloadProgress
 from .settings import AppState, CONFIG_DIR, Settings
@@ -107,12 +107,25 @@ class MainWindow(QMainWindow):
         self.source.setAccessibleName("TikTok username or profile URL")
         self.source.setPlaceholderText("@username or TikTok profile URL")
         source_row.addWidget(self.source, 1)
-        self.restore_scan_button = QPushButton("&Restore Scan")
-        self.restore_scan_button.clicked.connect(self.restore_scan)
-        source_row.addWidget(self.restore_scan_button)
+        self.check_profile_button = QPushButton("Check Profile")
+        self.check_profile_button.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl(f"https://www.tiktok.com/@{profile_name(self.source.text())}")))
+        source_row.addWidget(self.check_profile_button)
         source_label = QLabel("&Profile")
         source_label.setBuddy(self.source)
         form.addRow(source_label, source_row)
+        scans_row = QHBoxLayout()
+        self.profile_scans = QComboBox()
+        self.profile_scans.setObjectName("profileScans")
+        self.profile_scans.setAccessibleName("Profile Scans")
+        scans_row.addWidget(self.profile_scans, 1)
+        self.restore_scan_button = QPushButton("&Restore Scan")
+        self.restore_scan_button.clicked.connect(self.restore_scan)
+        scans_row.addWidget(self.restore_scan_button)
+        scans_label = QLabel("Profile S&cans")
+        scans_label.setBuddy(self.profile_scans)
+        form.addRow(scans_label, scans_row)
+        self.refresh_profile_scans()
         destination_row = QHBoxLayout()
         self.destination = QLineEdit(self.settings.folder)
         self.destination.setObjectName("destination")
@@ -392,11 +405,22 @@ class MainWindow(QMainWindow):
         self.scanned_job = None
         self.download_videos.setEnabled(False)
 
+    def refresh_profile_scans(self):
+        selected = self.profile_scans.currentText()
+        self.profile_scans.clear()
+        self.profile_scans.addItems(sorted(
+            path.name.removesuffix("_combined_links.txt")
+            for path in self.preferences.scan_dir.glob("*_combined_links.txt")))
+        if selected:
+            self.profile_scans.setCurrentText(selected)
+        self.restore_scan_button.setEnabled(self.profile_scans.count() > 0)
+
     def restore_scan(self):
         self.clear_scan()
-        username = filename_component(profile_name(self.source.text()))
+        username = self.profile_scans.currentText()
         path = self.preferences.scan_dir / f"{username}_combined_links.txt"
         if path.exists():
+            self.source.setText(f"https://www.tiktok.com/@{username.lstrip('@')}")
             self.scanned_links = read_links(path)
             settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications"})
             self.scanned_job = Job(source=self.source.text(), folder=self.destination.text(), **settings)
@@ -565,6 +589,7 @@ class MainWindow(QMainWindow):
                 self.statusBar().showMessage("Browser session saved. Click Scan Profile when ready.")
             elif event["type"] == "scanned":
                 self.scanned_links = event["links"]
+                self.refresh_profile_scans()
             elif event["type"] == "indexing":
                 self.work_status = f"Indexed {event['total']} unique posts — {event['added']} new posts found"
                 self.log.appendPlainText(self.work_status)

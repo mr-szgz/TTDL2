@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-09-19
+
+### Added
+
+- Save and restore browser sessions, including cookies, local storage, and IndexedDB.
+- Check Session to load a saved session, check for the slider CAPTCHA, and continue setup or scanning in the same browser.
+- Download, check, and reinstall the selected browser from Settings.
+- Saved scans path and an Open saved scans folder button in Settings.
+
+### Changed
+
+- Moved settings into a dedicated tab.
+- Store profile scans in the app's user configuration directory, independently of the downloads folder. Move existing `*_combined_links.txt` files into its `scans` subfolder to restore them.
+- Consolidated Windows release builds into `scripts/build.ps1` and switched installer runtime setup to PowerShell 7.4 or later.
+
 ## [3.0.0] - 2026-09-19
 
 ### Added
@@ -45,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.0.0...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.1.0...HEAD
+[3.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.1.0
 [3.0.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.0.0
 [2.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v2.1.0

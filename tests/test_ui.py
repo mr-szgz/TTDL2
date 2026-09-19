@@ -170,7 +170,10 @@ def test_profile_list_reload_and_busy_state(window, qtbot, tmp_path):
 
 
 def test_hd_mass_only_screen(window, qtbot):
-    assert not window.download_tab.findChildren(QComboBox)
+    assert window.download_tab.findChildren(QComboBox) == [window.profile_scans]
+    assert window.source.geometry().bottom() < window.profile_scans.geometry().top()
+    assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
+    assert not window.restore_scan_button.isEnabled()
     assert window.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
     assert window.auto_download.isChecked()
     assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
@@ -488,6 +491,18 @@ def test_worker_traceback(window, qtbot, job_factory, server):
 
 
 @pytest.mark.parametrize("source", ["@alice", "https://www.tiktok.com/@alice/?lang=en"])
+def test_check_profile_opens_default_browser(window, qtbot, monkeypatch, source):
+    from PySide6.QtGui import QDesktopServices
+
+    opened = []
+    monkeypatch.setattr(QDesktopServices, "openUrl", lambda url: opened.append(url.toString()))
+    window.source.setText(source)
+    qtbot.mouseClick(window.check_profile_button, Qt.MouseButton.LeftButton)
+    assert opened == ["https://www.tiktok.com/@alice"]
+    assert window.process.state() == QProcess.ProcessState.NotRunning
+
+
+@pytest.mark.parametrize("source", ["@another", "https://www.tiktok.com/@another/?lang=en"])
 @pytest.mark.parametrize("automatic", [False, True])
 def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, automatic):
     window.auto_download.setChecked(automatic)
@@ -495,11 +510,15 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, aut
     folder.mkdir()
     links = [server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
     (window.preferences.scan_dir / "alice_combined_links.txt").write_text("\n".join(links), encoding="utf-8-sig")
+    (window.preferences.scan_dir / "bob_combined_links.txt").write_text("https://www.tiktok.com/@bob/video/789")
+    window.refresh_profile_scans()
+    window.profile_scans.setCurrentText("alice")
     window.source.setText(source)
     window.destination.setText(str(folder))
     qtbot.mouseClick(window.restore_scan_button, Qt.MouseButton.LeftButton)
     assert window.scanned_links == links
-    assert window.scanned_job.source == source
+    assert window.source.text() == "https://www.tiktok.com/@alice"
+    assert window.scanned_job.source == "https://www.tiktok.com/@alice"
     assert window.scanned_job.folder == str(folder)
     assert window.download_videos.isEnabled()
     assert window.statusBar().currentMessage() == "Scan restored — 2 total results."
@@ -524,6 +543,7 @@ def test_restore_missing_scan_disables_download(window, qtbot, tmp_path):
     window.destination.setText(str(tmp_path))
     path = window.preferences.scan_dir / "alice_combined_links.txt"
     path.write_text("https://www.tiktok.com/@alice/video/123")
+    window.refresh_profile_scans()
     qtbot.mouseClick(window.restore_scan_button, Qt.MouseButton.LeftButton)
     assert window.download_videos.isEnabled()
     path.unlink()
