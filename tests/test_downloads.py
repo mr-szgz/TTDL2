@@ -5,19 +5,22 @@ from requests.exceptions import HTTPError
 import pytest
 from tiktok_downloader.core import Control, Downloader, filename_component, post_parts, profile_name, read_links
 
-def test_hd_mass_download(job_factory, server):
-    job = job_factory(json_logs=True, download_logs=True)
+@pytest.mark.parametrize(("video_dir", "image_dir"), [("video", "photo"), ("Videos", "Images")])
+def test_hd_mass_download(job_factory, server, video_dir, image_dir):
+    job = job_factory(json_logs=True, download_logs=True, video_dir=video_dir, image_dir=image_dir)
     events = []
     downloader = Downloader(job, events.append, Control())
     downloader.run(downloader.scan())
     root = Path(job.folder) / "alice"
-    assert (root / "video" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
+    assert (root / video_dir / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
     for i in (1, 2):
-        assert (root / "photo" / f"456_{i}.jpg").read_bytes() == f"fixture-media:/media/{i}.jpg".encode()
+        assert (root / image_dir / f"456_{i}.jpg").read_bytes() == f"fixture-media:/media/{i}.jpg".encode()
     assert (Path(job.scan_dir) / "alice_combined_links.txt").read_text().splitlines() == [
         server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
     assert not list(Path(job.folder).glob("*_combined_links.txt"))
-    assert (root / "123_HD.json").exists()
+    assert (root / "Data" / "json" / "123_HD.json").exists()
+    assert (root / "Data" / "json" / "456_HD.json").exists()
+    assert not (root / "123_HD.json").exists()
     assert not (root / "alice_index.txt").exists()
     assert (Path(job.index_dir) / "alice_index.txt").read_text().splitlines() == ["123_HD", "456_1.jpg", "456_2.jpg"]
     assert events[-1] == {"type": "done", "stopped": False}

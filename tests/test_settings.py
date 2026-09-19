@@ -65,6 +65,8 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     window.tabs.setCurrentWidget(window.settings_tab)
     window.browser.setCurrentText("firefox")
     window.executable.setText("custom-browser")
+    window.video_dir.setText("Videos")
+    window.image_dir.setText("Images")
     for check in window.checks.values():
         check.setChecked(True)
     assert not window.preferences.state_path.exists()
@@ -79,10 +81,14 @@ def test_save_restart_reset_and_close(qtbot, tmp_path):
     assert all(check.isChecked() for check in restored.checks.values())
     assert restored.browser.currentText() == "firefox"
     assert restored.executable.text() == "custom-browser"
+    assert restored.video_dir.text() == "Videos"
+    assert restored.image_dir.text() == "Images"
     restored.tabs.setCurrentWidget(restored.settings_tab)
     qtbot.mouseClick(restored.restore_defaults_button, Qt.MouseButton.LeftButton)
     assert restored.browser.currentText() == "chromium"
     assert restored.executable.text() == ""
+    assert restored.video_dir.text() == "video"
+    assert restored.image_dir.text() == "photo"
     assert restored.settings == AppConfig()
     assert not any(check.isChecked() for check in restored.checks.values())
     assert restored.source.text() == ""
@@ -130,6 +136,11 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     assert window.state_path.isReadOnly()
     assert window.scan_path.text() == str(tmp_path / "scans")
     assert window.scan_path.isReadOnly()
+    window.destination.setText(str(tmp_path / "downloads"))
+    assert window.api_json_path.text() == str(tmp_path / "downloads" / "<username>" / "Data" / "json")
+    assert window.api_json_path.isReadOnly()
+    assert window.video_dir.text() == "video"
+    assert window.image_dir.text() == "photo"
     assert window.preferences.scan_dir.is_dir()
     assert window.preferences.index_dir == tmp_path / "indexes"
     assert window.preferences.index_dir.is_dir()

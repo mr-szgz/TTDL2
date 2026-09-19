@@ -23,6 +23,8 @@ class AppState(BaseModel):
 class AppConfig(AppState):
     remember_settings: bool = True
     images_only: bool = False
+    video_dir: str = "video"
+    image_dir: str = "photo"
     json_logs: bool = False
     download_logs: bool = False
     notifications: bool = False

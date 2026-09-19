@@ -386,6 +386,12 @@ class MainWindow(QMainWindow):
         scan_actions.addWidget(self.open_scans_button)
         scan_actions.addStretch()
         downloads_form.addRow("", scan_actions)
+        self.video_dir = QLineEdit(self.settings.video_dir)
+        self.video_dir.textChanged.connect(lambda value: self.update_option("video_dir", value))
+        downloads_form.addRow("Video folder", self.video_dir)
+        self.image_dir = QLineEdit(self.settings.image_dir)
+        self.image_dir.textChanged.connect(lambda value: self.update_option("image_dir", value))
+        downloads_form.addRow("Image folder", self.image_dir)
         downloads_options = QHBoxLayout()
         for key, title in [("json_logs", "Save API JSON"), ("download_logs", "Save download log")]:
             check = QCheckBox(title)
@@ -395,6 +401,11 @@ class MainWindow(QMainWindow):
             downloads_options.addWidget(check)
         downloads_options.addStretch()
         downloads_form.addRow(downloads_options)
+        self.api_json_path = QLineEdit(str(Path(self.destination.text()) / "<username>" / "Data" / "json"))
+        self.api_json_path.setReadOnly(True)
+        self.destination.textChanged.connect(lambda folder: self.api_json_path.setText(
+            str(Path(folder) / "<username>" / "Data" / "json")))
+        downloads_form.addRow("API JSON folder", self.api_json_path)
         settings_layout.addWidget(downloads_group)
         settings_layout.addStretch()
         settings_separator = QFrame()
@@ -565,6 +576,8 @@ class MainWindow(QMainWindow):
         self.profile_usernames.setCurrentIndex(self.profile_usernames.findText(self.settings.selected_username))
         self.browser.setCurrentText(self.settings.browser)
         self.executable.setText(self.settings.executable)
+        self.video_dir.setText(self.settings.video_dir)
+        self.image_dir.setText(self.settings.image_dir)
         for name, check in self.checks.items():
             check.setChecked(getattr(self.settings, name))
         if self.settings.window_geometry:

@@ -15,6 +15,8 @@ class Job:
     source: str
     folder: str
     images_only: bool = False
+    video_dir: str = "video"
+    image_dir: str = "photo"
     json_logs: bool = False
     download_logs: bool = False
     browser: str = "chromium"
@@ -164,7 +166,7 @@ class Downloader:
                 url = response.url
         username, kind, media_id = post_parts(url)
         job = self.job
-        existing_video = Path(job.folder) / filename_component(username) / "video" / f"{media_id}_HD.mp4"
+        existing_video = Path(job.folder) / filename_component(username) / job.video_dir / f"{media_id}_HD.mp4"
         if kind == "video" and existing_video.exists():
             self.log(f"Already downloaded: {existing_video.name}")
             return True
@@ -190,14 +192,16 @@ class Downloader:
         index_dir = Path(job.index_dir)
         index_dir.mkdir(parents=True, exist_ok=True)
         if job.json_logs:
-            (root / f"{media_id}_HD.json").write_text(json.dumps(raw, indent=2), encoding="utf-8")
+            json_dir = root / "Data" / "json"
+            json_dir.mkdir(parents=True, exist_ok=True)
+            (json_dir / f"{media_id}_HD.json").write_text(json.dumps(raw, indent=2), encoding="utf-8")
         for category, name, asset_url, index_id in assets:
             if not self.control.checkpoint():
                 return False
             if job.images_only and category == "video":
                 self.log(f"Skipped video {media_id} (images only)")
                 continue
-            destination = root / category / name
+            destination = root / (job.image_dir if category == "photo" else job.video_dir) / name
             if destination.exists():
                 self.log(f"Already downloaded: {destination.name}")
                 continue
