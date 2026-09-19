@@ -34,7 +34,10 @@ def test_start_minimizes_real_browser_and_closes_before_downloads(job_factory, s
 
     monkeypatch.setattr(CDPSession, "send", observe_send)
     monkeypatch.setattr(Browser, "close", observe_close)
-    Downloader(job, start, control).run()
+    downloader = Downloader(job, start, control)
+    links = downloader.scan()
+    assert server[1]["/api/hd"] == 0
+    downloader.run(links)
 
     assert states == ["normal", "minimized"]
     assert closed == [True]

@@ -8,7 +8,8 @@ from tiktok_downloader.core import Control, Downloader, filename_component, post
 def test_hd_mass_download(job_factory, server):
     job = job_factory(json_logs=True, download_logs=True)
     events = []
-    Downloader(job, events.append, Control()).run()
+    downloader = Downloader(job, events.append, Control())
+    downloader.run(downloader.scan())
     root = Path(job.folder) / "alice"
     assert (root / "Videos" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
     for i in (1, 2):
@@ -29,12 +30,14 @@ def test_hd_mass_download(job_factory, server):
     assert server[1]["/media/watermark.mp4"] == 0
     assert server[1]["/@alice/video/123"] == 0
     before = sum(v for k,v in server[1].items() if k.startswith("/media/"))
-    Downloader(job, events.append, Control()).run()
+    downloader = Downloader(job, events.append, Control())
+    downloader.run(downloader.scan())
     assert sum(v for k,v in server[1].items() if k.startswith("/media/")) == before
 
 def test_images_only(job_factory):
     job = job_factory(images_only=True)
-    Downloader(job, lambda _: None, Control()).run()
+    downloader = Downloader(job, lambda _: None, Control())
+    downloader.run(downloader.scan())
     assert not list(Path(job.folder).rglob("*.mp4"))
     assert len(list(Path(job.folder).rglob("*.jpg"))) == 2
 
@@ -46,7 +49,8 @@ def test_stop_during_download(job_factory):
         events.append(event)
         if event["type"] == "log" and "/Videos/" in event["message"].replace("\\", "/") and event["message"].startswith("Saved"):
             control.stop()
-    Downloader(job, emit, control).run()
+    downloader = Downloader(job, emit, control)
+    downloader.run(downloader.scan())
     assert events[-1] == {"type": "done", "stopped": True}
     assert len(list(Path(job.folder).rglob("*.mp4"))) == 1
     assert not list(Path(job.folder).rglob("*.jpg"))
@@ -71,7 +75,8 @@ def test_pause_resume():
 def test_original_hd_provider_failure_is_not_replaced(path, error, job_factory, server):
     job = job_factory(hd_api=server[0] + path)
     with pytest.raises(error):
-        Downloader(job, lambda _: None, Control()).run()
+        downloader = Downloader(job, lambda _: None, Control())
+        downloader.run(downloader.scan())
     assert server[1][path] == 1
     assert not list(Path(job.folder).rglob("*.mp4"))
 

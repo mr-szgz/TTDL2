@@ -1,0 +1,7 @@
+[tools]
+powershell = "7"
+python = "3.12.10"
+uv = "latest"
+
+[env]
+UV_LINK_MODE="copy"

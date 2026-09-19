@@ -236,8 +236,8 @@ wheels = [
 ]
 
 [[package]]
-name = "tiktok-downloader2"
-version = "2.0.0"
+name = "ttdl2"
+version = "2.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "playwright" },

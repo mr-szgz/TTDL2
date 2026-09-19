@@ -98,7 +98,7 @@ class Downloader:
             page.goto(f"{job.site}/@{quote(username)}", wait_until="domcontentloaded", timeout=120000)
             if job.manual_start:
                 self.control.pause()
-                self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Start indexing in the app when ready."})
+                self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
             if self.control.checkpoint() and not job.headless:
                 session = context.new_cdp_session(page)
                 window_id = session.send("Browser.getWindowForTarget")["windowId"]
@@ -193,10 +193,16 @@ class Downloader:
             self.log(f"Saved {destination}")
         return True
 
-    def run(self):
+    def scan(self):
         job = self.job
         Path(job.folder).mkdir(parents=True, exist_ok=True)
         links = self.collect_profile()
+        if not self.control.stopped.is_set():
+            self.emit({"type": "scanned", "links": links})
+        self.emit({"type": "done", "stopped": self.control.stopped.is_set()})
+        return links
+
+    def run(self, links):
         self.emit({"type": "progress", "current": 0, "total": len(links)})
         for current, link in enumerate(links, 1):
             if not self.control.checkpoint():

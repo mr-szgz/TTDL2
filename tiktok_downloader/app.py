@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 
-from PySide6.QtCore import QProcess, QUrl
+from PySide6.QtCore import QProcess, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
@@ -12,7 +12,9 @@ from PySide6.QtWidgets import (
     QMessageBox, QPlainTextEdit, QProgressBar, QPushButton, QVBoxLayout, QWidget,
 )
 
-from .core import Job
+from .core import Job, filename_component, profile_name, read_links
+from . import __version__
+from .progress import DownloadProgress
 from .settings import Settings, load_settings, save_settings, settings_path
 
 
@@ -63,6 +65,13 @@ class MainWindow(QMainWindow):
         self.stopping = False
         self.completed = False
         self.work_status = "Ready"
+        self.download_progress = None
+        self.scanned_links = None
+        self.scanned_job = None
+        self.scanning = False
+        self.status_timer = QTimer(self)
+        self.status_timer.setInterval(1000)
+        self.status_timer.timeout.connect(self.show_work_status)
         self.setWindowTitle("TikTok Downloader 2")
         self.resize(840, 660)
         self.setMinimumSize(500, 480)
@@ -74,7 +83,7 @@ class MainWindow(QMainWindow):
         title = QLabel("TikTok Downloader 2")
         layout.addWidget(title)
         layout.addWidget(QLabel("HD mass download"))
-        instructions = QLabel("Profile downloads: set up the browser session, then click Start indexing here.")
+        instructions = QLabel("Set up the browser session, click Scan Profile, then Download Videos when the scan finishes.")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
         self.inputs = QWidget()
@@ -86,6 +95,9 @@ class MainWindow(QMainWindow):
         self.source.setAccessibleName("TikTok username or profile URL")
         self.source.setPlaceholderText("@username or TikTok profile URL")
         source_row.addWidget(self.source, 1)
+        self.restore_scan_button = QPushButton("&Restore Scan")
+        self.restore_scan_button.clicked.connect(self.restore_scan)
+        source_row.addWidget(self.restore_scan_button)
         source_label = QLabel("&Profile")
         source_label.setBuddy(self.source)
         form.addRow(source_label, source_row)
@@ -105,10 +117,15 @@ class MainWindow(QMainWindow):
         self.download = QPushButton("Open &browser")
         self.download.setObjectName("downloadButton")
         self.download.clicked.connect(self.start_download)
-        self.start_indexing = QPushButton("&Start indexing")
+        self.start_indexing = QPushButton("&Scan Profile")
         self.start_indexing.setObjectName("startIndexingButton")
         self.start_indexing.setEnabled(False)
         self.start_indexing.clicked.connect(self.begin_indexing)
+        self.download_videos = QPushButton("&Download Videos")
+        self.download_videos.setEnabled(False)
+        self.download_videos.clicked.connect(lambda: self.start_job(self.scanned_job, self.scanned_links))
+        self.source.textChanged.connect(self.clear_scan)
+        self.destination.textChanged.connect(self.clear_scan)
         self.pause = QPushButton("&Pause")
         self.pause.clicked.connect(self.toggle_pause)
         self.stop = QPushButton("&Stop")
@@ -117,6 +134,7 @@ class MainWindow(QMainWindow):
         self.stop.setEnabled(False)
         actions.addWidget(self.download)
         actions.addWidget(self.start_indexing)
+        actions.addWidget(self.download_videos)
         actions.addWidget(self.pause)
         actions.addWidget(self.stop)
         actions.addStretch()
@@ -167,7 +185,7 @@ class MainWindow(QMainWindow):
             save_settings(self.settings, Path(path))
 
     def about(self):
-        QMessageBox.about(self, "About TikTok Downloader 2", "TikTok Downloader 2.0.0\nPython · PySide6 · Playwright\n\nBased on TikTok Downloader\n© 2024 Jettcodey · MIT License")
+        QMessageBox.about(self, "About TikTok Downloader 2", f"TikTok Downloader {__version__}\nPython · PySide6 · Playwright\n\nBased on TikTok Downloader\n© 2024 Jettcodey · MIT License")
 
     def start_download(self):
         self.settings.folder = self.destination.text()
@@ -176,21 +194,55 @@ class MainWindow(QMainWindow):
         del settings["notifications"]
         self.start_job(Job(source=self.source.text(), **settings))
 
-    def start_job(self, job):
+    def clear_scan(self):
+        self.scanned_links = None
+        self.download_videos.setEnabled(False)
+
+    def restore_scan(self):
+        self.clear_scan()
+        username = filename_component(profile_name(self.source.text()))
+        path = Path(self.destination.text()) / f"{username}_combined_links.txt"
+        if path.exists():
+            self.scanned_links = read_links(path)
+            self.settings.folder = self.destination.text()
+            save_settings(self.settings, self.config_path)
+            settings = asdict(self.settings)
+            del settings["notifications"]
+            self.scanned_job = Job(source=self.source.text(), **settings)
+            self.download_progress = None
+            self.paused = self.stopping = False
+            self.progress.setRange(0, max(len(self.scanned_links), 1))
+            self.progress.setValue(0)
+            self.progress.setFormat(f"{len(self.scanned_links)} scanned posts")
+            self.work_status = f"Scan restored — {len(self.scanned_links)} total results."
+            self.log.appendPlainText(f"{self.work_status} Loaded {path}")
+            self.statusBar().showMessage(self.work_status)
+            self.download_videos.setEnabled(bool(self.scanned_links))
+        else:
+            self.statusBar().showMessage(f"No saved scan found: {path}")
+
+    def start_job(self, job, links=None):
+        self.status_timer.stop()
+        self.download_progress = None
+        self.scanning = links is None
+        if self.scanning:
+            self.scanned_links = None
+            self.scanned_job = job
+        self.download_videos.setEnabled(False)
         self.stderr_decoder.reset()
         self.start_indexing.setEnabled(False)
         self.completed = self.stopping = self.paused = False
-        self.work_status = "Opening browser"
+        self.work_status = "Opening browser" if self.scanning else "Starting downloads"
         self.pause.setText("&Pause")
         self.log.clear()
         self.progress.setRange(0, 0)
         self.set_busy(True)
-        self.pause.setEnabled(False)
-        self.statusBar().showMessage("Opening browser")
+        self.pause.setEnabled(not self.scanning)
+        self.statusBar().showMessage(self.work_status)
         self.process.setProgram(str(Path(sys.executable).with_name("python.exe")))
         self.process.setArguments(["-u", "-m", "tiktok_downloader.worker"])
         self.process.start()
-        self.process.write((json.dumps(asdict(job)) + "\n").encode())
+        self.process.write((json.dumps({"job": asdict(job), "links": links}) + "\n").encode())
 
     def set_busy(self, busy):
         self.inputs.setEnabled(not busy)
@@ -202,6 +254,11 @@ class MainWindow(QMainWindow):
 
     def toggle_pause(self):
         self.paused = not self.paused
+        if self.download_progress is not None:
+            if self.paused:
+                self.download_progress.pause()
+            else:
+                self.download_progress.resume()
         self.process.write(b"pause\n" if self.paused else b"resume\n")
         self.pause.setText("&Resume" if self.paused else "&Pause")
         self.show_work_status()
@@ -225,7 +282,8 @@ class MainWindow(QMainWindow):
 
     def show_work_status(self):
         prefix = "Stopping — " if self.stopping else "Paused — " if self.paused else ""
-        self.statusBar().showMessage(prefix + self.work_status)
+        metrics = "" if self.download_progress is None else " — " + self.download_progress.summary()
+        self.statusBar().showMessage(prefix + self.work_status + metrics)
 
     def read_events(self):
         while self.process.canReadLine():
@@ -236,7 +294,9 @@ class MainWindow(QMainWindow):
                 self.paused = True
                 self.pause.setEnabled(False)
                 self.start_indexing.setEnabled(True)
-                self.statusBar().showMessage("Waiting for you to click Start indexing")
+                self.statusBar().showMessage("Waiting for you to click Scan Profile")
+            elif event["type"] == "scanned":
+                self.scanned_links = event["links"]
             elif event["type"] == "indexing":
                 self.work_status = f"Indexing page {event['page']} — {event['total']} total results"
                 self.log.appendPlainText(self.work_status)
@@ -245,10 +305,19 @@ class MainWindow(QMainWindow):
                 self.work_status = f"Downloading ({event['current']}/{event['total']})"
                 self.show_work_status()
             elif event["type"] == "progress":
+                if event["current"] == 0:
+                    self.download_progress = DownloadProgress(event["total"])
+                    if self.paused:
+                        self.download_progress.pause()
+                    self.status_timer.start()
+                self.download_progress.completed = event["current"]
+                if event["current"] > 0:
+                    self.show_work_status()
                 self.progress.setRange(0, max(event["total"], 1))
                 self.progress.setValue(event["current"])
                 self.progress.setFormat(f"{event['current']} / {event['total']} posts")
             elif event["type"] == "done":
+                self.status_timer.stop()
                 self.completed = True
                 self.stopping = event["stopped"]
 
@@ -260,14 +329,21 @@ class MainWindow(QMainWindow):
     def process_finished(self, code, status):
         self.read_events()
         self.read_errors()
+        self.status_timer.stop()
         self.set_busy(False)
         self.start_indexing.setEnabled(False)
         if code != 0 or status == QProcess.ExitStatus.CrashExit:
             self.statusBar().showMessage(f"Process exited with code {code}; see traceback above")
         elif self.completed:
-            self.statusBar().showMessage("Stopped" if self.stopping else "Completed")
+            if self.stopping:
+                self.statusBar().showMessage("Stopped")
+            elif self.scanning:
+                self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} total results. Click Download Videos.")
+            else:
+                self.statusBar().showMessage("Completed")
             if self.settings.notifications and not self.stopping:
                 QApplication.alert(self)
+        self.download_videos.setEnabled(bool(self.scanned_links))
 
     def closeEvent(self, event):
         if self.process.state() != QProcess.ProcessState.NotRunning:

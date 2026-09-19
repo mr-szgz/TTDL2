@@ -3,8 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "tiktok-downloader2"
-version = "2.0.0"
+name = "ttdl2"
+version = "2.1.0"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE.txt"]
 description = "TikTok Downloader, second edition: Python, Qt and Playwright"
 requires-python = ">=3.12"
 dependencies = ["PySide6>=6.8,<7", "playwright>=1.51,<2"]
@@ -13,7 +16,7 @@ dependencies = ["PySide6>=6.8,<7", "playwright>=1.51,<2"]
 test = ["pytest>=8", "pytest-qt>=4.4"]
 
 [project.gui-scripts]
-tiktok-downloader2 = "tiktok_downloader.app:main"
+ttdl2 = "tiktok_downloader.app:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["tiktok_downloader"]
@@ -21,4 +24,3 @@ packages = ["tiktok_downloader"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
-

@@ -8,7 +8,8 @@ from .core import Control, Downloader, Job
 
 
 def main():
-    job = Job(**json.loads(sys.stdin.readline()))
+    request = json.loads(sys.stdin.readline())
+    job = Job(**request["job"])
     control = Control()
 
     def commands():
@@ -16,7 +17,11 @@ def main():
             {"pause": control.pause, "resume": control.resume, "stop": control.stop}[line.strip()]()
 
     threading.Thread(target=commands, daemon=True).start()
-    Downloader(job, lambda event: print(json.dumps(event), flush=True), control).run()
+    downloader = Downloader(job, lambda event: print(json.dumps(event), flush=True), control)
+    if request["links"] is None:
+        downloader.scan()
+    else:
+        downloader.run(request["links"])
 
 
 if __name__ == "__main__":
