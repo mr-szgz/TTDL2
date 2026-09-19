@@ -32,7 +32,7 @@ Source: "..\pyproject.toml"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\uv.lock"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}\app"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}\app"; Flags: ignoreversion
-Source: "install-runtime.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "install-runtime.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -72,8 +72,8 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then begin
     WizardForm.StatusLabel.Caption := 'Installing Python, dependencies, and Chromium...';
-    ExecAndLogOutput(ExpandConstant('{cmd}'),
-      '/D /C ""' + ExpandConstant('{app}\install-runtime.cmd') + '""',
+    ExecAndLogOutput('pwsh.exe',
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\install-runtime.ps1') + '"',
       ExpandConstant('{app}'), SW_HIDE, ewWaitUntilTerminated, DependencyExitCode, @DependencyOutput);
     Log('Dependency setup exit code: ' + IntToStr(DependencyExitCode));
   end;
