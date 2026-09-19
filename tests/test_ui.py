@@ -122,30 +122,53 @@ def test_save_session_and_restore_after_restart(window, qtbot, job_factory, tmp_
     assert not jobs[-1].restore_session
 
 
-@pytest.mark.parametrize("count", [1, 3])
+@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
+@pytest.mark.parametrize("content, expected", [
+    ("@profile10\n@Profile2\n@profile1\n@profile2\n", "@profile1\n@Profile2\n@profile2\n@profile10\n"),
+    ("@p2part10\n@p2part2\n@p1part20", "@p1part20\n@p2part2\n@p2part10"),
+    ("@p10\n\n@p2\n@p2\n", "\n@p2\n@p2\n@p10\n"),
+    ("", ""),
+])
+def test_sort_profile_list_file(window, qtbot, tmp_path, encoding, content, expected):
+    path = tmp_path / "profiles.txt"
+    path.write_text(content, encoding=encoding)
+    window.profile_list.setText(str(path))
+    qtbot.mouseClick(window.sort_file_button, Qt.MouseButton.LeftButton)
+    assert path.read_text(encoding="utf-8") == expected
+    assert window.statusBar().currentMessage() == "Profile list file sorted."
+
+
+@pytest.mark.parametrize("count", [0, 1, 3])
 def test_profile_list_navigation(window, qtbot, tmp_path, count):
     profiles = [f"https://www.tiktok.com/@profile{i}" for i in range(count)]
     path = tmp_path / "profiles.txt"
     path.write_text("\n\n".join(profiles) + "\n", encoding="utf-8-sig")
+    window.source.setText("@manual")
     window.profile_list.setText(str(path))
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
-    assert window.source.text() == profiles[0]
+    assert window.source.text() == "@manual"
+    assert window.profile_usernames.currentIndex() == 0
+    assert window.profile_usernames.currentData() is None
+    assert window.profile_usernames.currentText() == "- select profile -"
     assert not window.prev_profile_button.isEnabled()
-    assert window.next_profile_button.isEnabled() == (count > 1)
+    assert window.next_profile_button.isEnabled() == (count > 0)
     qtbot.mouseClick(window.prev_profile_button, Qt.MouseButton.LeftButton)
-    assert window.source.text() == profiles[0]
-    for index in range(1, count):
+    assert window.source.text() == "@manual"
+    for index in range(count):
         window.scanned_links = ["old scan"]
         qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+        assert window.profile_usernames.currentIndex() == index + 1
         assert window.source.text() == profiles[index]
         assert window.scanned_links is None
         assert window.prev_profile_button.isEnabled()
     assert not window.next_profile_button.isEnabled()
     qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
-    assert window.source.text() == profiles[-1]
-    for index in range(count - 2, -1, -1):
+    assert window.profile_usernames.currentIndex() == count
+    for index in range(count - 1, -1, -1):
+        previous_source = window.source.text()
         qtbot.mouseClick(window.prev_profile_button, Qt.MouseButton.LeftButton)
-        assert window.source.text() == profiles[index]
+        assert window.profile_usernames.currentIndex() == index
+        assert window.source.text() == (profiles[index - 1] if index else previous_source)
     assert not window.prev_profile_button.isEnabled()
 
 
@@ -154,23 +177,88 @@ def test_profile_list_reload_and_busy_state(window, qtbot, tmp_path):
     path.write_text("https://www.tiktok.com/@alice\nhttps://www.tiktok.com/@bob\n", encoding="utf-8")
     window.profile_list.setText(str(path))
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
-    qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+    window.profile_usernames.setCurrentIndex(2)
     window.set_busy(True)
     assert not window.profile_list.isEnabled()
     assert not window.load_profile_list_button.isEnabled()
+    assert not window.profile_usernames.isEnabled()
     assert not window.prev_profile_button.isEnabled()
     window.set_busy(False)
     assert window.prev_profile_button.isEnabled()
     assert not window.next_profile_button.isEnabled()
     path.write_text("https://www.tiktok.com/@carol\n", encoding="utf-8")
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
-    assert window.source.text() == "https://www.tiktok.com/@carol"
-    assert not window.next_profile_button.isEnabled()
+    assert window.source.text() == "https://www.tiktok.com/@bob"
+    assert window.profile_usernames.count() == 2
+    assert window.profile_usernames.currentData() is None
+    assert window.profile_usernames.currentText() == "- select profile -"
+    assert window.next_profile_button.isEnabled()
     assert not window.prev_profile_button.isEnabled()
 
 
+def test_profile_list_username_selection_is_one_way(window, qtbot, tmp_path):
+    path = tmp_path / "profiles.txt"
+    path.write_text("https://www.tiktok.com/@alice\n@bob\ncarol\n", encoding="utf-8")
+    window.profile_list.setText(str(path))
+    qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
+    assert [window.profile_usernames.itemText(i) for i in range(4)] == ["- select profile -", "alice", "bob", "carol"]
+    assert window.load_profile_list_button.geometry().bottom() < window.profile_usernames.geometry().top()
+    assert window.profile_usernames.geometry().bottom() < window.source.geometry().top()
+    assert window.prev_profile_button.geometry().top() == window.profile_usernames.geometry().top()
+    assert window.next_profile_button.geometry().top() == window.profile_usernames.geometry().top()
+    window.profile_usernames.setCurrentIndex(2)
+    assert window.source.text() == "@bob"
+    window.source.setText("@manual")
+    assert window.profile_usernames.currentText() == "bob"
+    assert window.profile_usernames.currentData() == "@bob"
+    qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == "carol"
+    assert window.profile_usernames.currentText() == "carol"
+    qtbot.mouseClick(window.prev_profile_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == "@bob"
+    assert window.profile_usernames.currentText() == "bob"
+    window.profile_usernames.setCurrentIndex(0)
+    assert window.source.text() == "@bob"
+
+
+def test_profile_list_filter_is_explicit_and_matches_usernames(window, qtbot, tmp_path):
+    path = tmp_path / "profiles.txt"
+    path.write_text("https://www.tiktok.com/@Alice\n@malice2\n@bob\n", encoding="utf-8")
+    window.profile_list.setText(str(path))
+    window.source.setText("@manual")
+    qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
+    assert window.profile_filter.placeholderText() == "filter"
+    assert window.profile_usernames.geometry().bottom() < window.profile_filter.geometry().top()
+    assert window.profile_filter.geometry().bottom() < window.source.geometry().top()
+    assert window.profile_filter.geometry().top() == window.filter_profiles_button.geometry().top()
+    qtbot.keyClicks(window.profile_filter, "LIcE")
+    assert window.profile_usernames.count() == 4
+    qtbot.mouseClick(window.filter_profiles_button, Qt.MouseButton.LeftButton)
+    assert [window.profile_usernames.itemText(i) for i in range(3)] == ["- select profile -", "Alice", "malice2"]
+    assert window.profile_usernames.currentData() is None
+    assert window.source.text() == "@manual"
+    qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == "https://www.tiktok.com/@Alice"
+    qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
+    assert window.source.text() == "@malice2"
+    assert not window.next_profile_button.isEnabled()
+    window.profile_filter.setText("tiktok")
+    qtbot.mouseClick(window.filter_profiles_button, Qt.MouseButton.LeftButton)
+    assert window.profile_usernames.count() == 1
+    assert window.source.text() == "@malice2"
+    assert not window.next_profile_button.isEnabled()
+    assert not window.prev_profile_button.isEnabled()
+    window.profile_filter.clear()
+    assert window.profile_usernames.count() == 1
+    qtbot.mouseClick(window.filter_profiles_button, Qt.MouseButton.LeftButton)
+    assert window.profile_usernames.count() == 4
+    assert window.source.text() == "@malice2"
+    assert window.profile_usernames.itemData(3) == "@bob"
+    assert path.read_text() == "https://www.tiktok.com/@Alice\n@malice2\n@bob\n"
+
+
 def test_hd_mass_only_screen(window, qtbot):
-    assert window.download_tab.findChildren(QComboBox) == [window.profile_scans]
+    assert window.download_tab.findChildren(QComboBox) == [window.profile_usernames, window.profile_scans]
     assert window.source.geometry().bottom() < window.profile_scans.geometry().top()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()

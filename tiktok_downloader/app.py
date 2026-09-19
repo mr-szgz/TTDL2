@@ -3,15 +3,16 @@ import codecs
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
-from PySide6.QtCore import QByteArray, QProcess, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QProcess, QSize, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox,
     QFileDialog, QFormLayout, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QPlainTextEdit, QProgressBar, QPushButton, QTabWidget, QVBoxLayout, QWidget,
+    QPlainTextEdit, QProgressBar, QPushButton, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 from playwright.sync_api import sync_playwright
 
@@ -66,7 +67,19 @@ class MainWindow(QMainWindow):
         title_font.setPointSize(20)
         title_font.setBold(True)
         title.setFont(title_font)
-        layout.addWidget(title)
+        title_row = QHBoxLayout()
+        title_row.addWidget(title)
+        title_row.addStretch()
+        self.repository_button = QToolButton()
+        self.repository_button.setIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "purple" / "ttdl2-icon-purple.png")))
+        self.repository_button.setIconSize(QSize(40, 40))
+        self.repository_button.setAutoRaise(True)
+        self.repository_button.setAccessibleName("Open repository")
+        self.repository_button.setToolTip("Open the ttdl2 repository on GitHub")
+        self.repository_button.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl("https://github.com/mr-szgz/ttdl2")))
+        title_row.addWidget(self.repository_button)
+        layout.addLayout(title_row)
         self.tabs = QTabWidget()
         self.download_tab = QWidget()
         self.settings_tab = QWidget()
@@ -79,7 +92,6 @@ class MainWindow(QMainWindow):
         form = QFormLayout(self.inputs)
         form.setContentsMargins(0, 8, 0, 8)
         self.profiles = []
-        self.profile_index = 0
         self.profile_list = QLineEdit(str(Path(self.settings.folder) / "ttdl2.txt"))
         self.profile_list.setObjectName("profileList")
         self.profile_list.setAccessibleName("Profile List")
@@ -92,18 +104,42 @@ class MainWindow(QMainWindow):
             QUrl.fromLocalFile(self.profile_list.text())))
         self.load_profile_list_button = QPushButton("&Load Profile List")
         self.load_profile_list_button.clicked.connect(self.load_profile_list)
+        self.sort_file_button = QPushButton("Sort file")
+        self.sort_file_button.clicked.connect(self.sort_profile_list)
         self.next_profile_button = QPushButton("&Next Profile")
-        self.next_profile_button.clicked.connect(lambda: self.select_profile(self.profile_index + 1))
+        self.next_profile_button.clicked.connect(lambda: self.profile_usernames.setCurrentIndex(
+            self.profile_usernames.currentIndex() + 1))
         self.prev_profile_button = QPushButton("Pre&v Profile")
-        self.prev_profile_button.clicked.connect(lambda: self.select_profile(self.profile_index - 1))
+        self.prev_profile_button.clicked.connect(lambda: self.profile_usernames.setCurrentIndex(
+            self.profile_usernames.currentIndex() - 1))
         self.next_profile_button.setEnabled(False)
         self.prev_profile_button.setEnabled(False)
         profile_actions.addWidget(self.open_profile_list_button)
         profile_actions.addWidget(self.load_profile_list_button)
-        profile_actions.addWidget(self.next_profile_button)
-        profile_actions.addWidget(self.prev_profile_button)
+        profile_actions.addWidget(self.sort_file_button)
         profile_actions.addStretch()
         form.addRow("", profile_actions)
+        self.profile_usernames = QComboBox()
+        self.profile_usernames.setObjectName("profileUsernames")
+        self.profile_usernames.setAccessibleName("Profile list usernames")
+        self.profile_usernames.addItem("- select profile -", None)
+        self.profile_usernames.currentIndexChanged.connect(self.select_profile)
+        usernames_label = QLabel("Usernames")
+        usernames_label.setBuddy(self.profile_usernames)
+        usernames_row = QHBoxLayout()
+        usernames_row.addWidget(self.profile_usernames, 1)
+        usernames_row.addWidget(self.prev_profile_button)
+        usernames_row.addWidget(self.next_profile_button)
+        form.addRow(usernames_label, usernames_row)
+        filter_row = QHBoxLayout()
+        self.profile_filter = QLineEdit()
+        self.profile_filter.setPlaceholderText("filter")
+        self.profile_filter.setAccessibleName("Filter profile usernames")
+        self.filter_profiles_button = QPushButton("Filter")
+        self.filter_profiles_button.clicked.connect(self.filter_profiles)
+        filter_row.addWidget(self.profile_filter, 1)
+        filter_row.addWidget(self.filter_profiles_button)
+        form.addRow("", filter_row)
         source_row = QHBoxLayout()
         self.source = QLineEdit(self.settings.source)
         self.source.setObjectName("source")
@@ -262,6 +298,10 @@ class MainWindow(QMainWindow):
         self.config_path = QLineEdit(str(self.preferences.config_path))
         self.config_path.setReadOnly(True)
         settings_form.addRow("User config path", self.config_path)
+        open_config = QPushButton("Open config &folder")
+        open_config.clicked.connect(lambda: QDesktopServices.openUrl(
+            QUrl.fromLocalFile(str(self.preferences.config_path.parent))))
+        settings_form.addRow("", open_config)
         self.state_path = QLineEdit(str(self.preferences.state_path))
         self.state_path.setReadOnly(True)
         settings_form.addRow("Saved state path", self.state_path)
@@ -272,10 +312,6 @@ class MainWindow(QMainWindow):
         self.open_scans_button.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(str(self.preferences.scan_dir))))
         settings_form.addRow("", self.open_scans_button)
-        open_config = QPushButton("Open config &folder")
-        open_config.clicked.connect(lambda: QDesktopServices.openUrl(
-            QUrl.fromLocalFile(str(self.preferences.config_path.parent))))
-        settings_form.addRow("", open_config)
         settings_layout.addLayout(settings_form)
         settings_actions = QHBoxLayout()
         self.save_settings_button = QPushButton("&Save Settings")
@@ -348,13 +384,36 @@ class MainWindow(QMainWindow):
 
     def load_profile_list(self):
         self.profiles = read_links(self.profile_list.text())
+        self.profile_filter.clear()
+        self.filter_profiles()
+
+    def filter_profiles(self):
+        query = self.profile_filter.text().casefold()
+        self.profile_usernames.blockSignals(True)
+        self.profile_usernames.clear()
+        self.profile_usernames.addItem("- select profile -", None)
+        for profile in self.profiles:
+            username = profile_name(profile)
+            if query in username.casefold():
+                self.profile_usernames.addItem(username, profile)
+        self.profile_usernames.blockSignals(False)
         self.select_profile(0)
 
+    def sort_profile_list(self):
+        path = Path(self.profile_list.text())
+        text = path.read_text(encoding="utf-8-sig")
+        lines = text.splitlines()
+        lines.sort(key=lambda line: [int(part) if index % 2 else part.casefold()
+                                    for index, part in enumerate(re.split(r"([0-9]+)", line))])
+        path.write_text("\n".join(lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
+        self.statusBar().showMessage("Profile list file sorted.")
+
     def select_profile(self, index):
-        self.source.setText(self.profiles[index])
-        self.profile_index = index
+        profile = self.profile_usernames.itemData(index)
+        if profile is not None:
+            self.source.setText(profile)
         self.prev_profile_button.setEnabled(index > 0)
-        self.next_profile_button.setEnabled(index < len(self.profiles) - 1)
+        self.next_profile_button.setEnabled(index < self.profile_usernames.count() - 1)
 
     def choose_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Download folder", self.destination.text())

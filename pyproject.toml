@@ -23,6 +23,7 @@ packages = ["tiktok_downloader"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "assets/purple/ttdl2-icon-purple.ico" = "assets/purple/ttdl2-icon-purple.ico"
+"assets/purple/ttdl2-icon-purple.png" = "assets/purple/ttdl2-icon-purple.png"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
