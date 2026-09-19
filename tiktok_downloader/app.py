@@ -123,10 +123,13 @@ class MainWindow(QMainWindow):
         self.next_profile_button = QPushButton("&Next Profile")
         self.next_profile_button.clicked.connect(lambda: self.profile_usernames.setCurrentIndex(
             self.profile_usernames.currentIndex() + 1))
+        self.next_to_scan_button = QPushButton("Next to Scan")
+        self.next_to_scan_button.clicked.connect(self.select_next_unscanned_profile)
         self.prev_profile_button = QPushButton("Pre&v Profile")
         self.prev_profile_button.clicked.connect(lambda: self.profile_usernames.setCurrentIndex(
             self.profile_usernames.currentIndex() - 1))
         self.next_profile_button.setEnabled(False)
+        self.next_to_scan_button.setEnabled(False)
         self.prev_profile_button.setEnabled(False)
         profile_actions.addWidget(self.load_profile_list_button)
         profile_actions.addWidget(self.sort_file_button)
@@ -143,6 +146,7 @@ class MainWindow(QMainWindow):
         usernames_row.addWidget(self.profile_usernames, 1)
         usernames_row.addWidget(self.prev_profile_button)
         usernames_row.addWidget(self.next_profile_button)
+        usernames_row.addWidget(self.next_to_scan_button)
         profiles_form.addRow(usernames_label, usernames_row)
         filter_row = QHBoxLayout()
         self.profile_filter = QLineEdit()
@@ -514,6 +518,13 @@ class MainWindow(QMainWindow):
             self.refresh_profile_scans()
         self.prev_profile_button.setEnabled(index > 0)
         self.next_profile_button.setEnabled(index < self.profile_usernames.count() - 1)
+        self.next_to_scan_button.setEnabled(index < self.profile_usernames.count() - 1)
+
+    def select_next_unscanned_profile(self):
+        for index in range(self.profile_usernames.currentIndex() + 1, self.profile_usernames.count()):
+            self.profile_usernames.setCurrentIndex(index)
+            if self.profile_scans.currentText().endswith("*"):
+                break
 
     def open_profile_downloads(self):
         folder = Path(self.destination.text()) / filename_component(profile_name(self.source.text()))

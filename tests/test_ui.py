@@ -154,6 +154,27 @@ def test_profile_list_username_selection_is_one_way(window, qtbot, tmp_path):
     assert window.source.text() == "@bob"
 
 
+def test_next_to_scan_skips_profiles_with_saved_results(window, qtbot, tmp_path):
+    path = tmp_path / "profiles.txt"
+    path.write_text("@alice\n@bob\n@carol\n@dave\n", encoding="utf-8")
+    (window.preferences.scan_dir / "alice_combined_links.txt").write_text("post")
+    (window.preferences.scan_dir / "carol_combined_links.txt").write_text("post")
+    window.profile_list.setText(str(path))
+    window.load_profile_list()
+
+    assert window.next_to_scan_button.text() == "Next to Scan"
+    assert window.next_profile_button.geometry().right() < window.next_to_scan_button.geometry().left()
+    qtbot.mouseClick(window.next_to_scan_button, Qt.MouseButton.LeftButton)
+    assert window.profile_usernames.currentText() == "bob"
+    assert window.profile_scans.currentText() == "bob*"
+
+    (window.preferences.scan_dir / "bob_combined_links.txt").write_text("post")
+    qtbot.mouseClick(window.next_to_scan_button, Qt.MouseButton.LeftButton)
+    assert window.profile_usernames.currentText() == "dave"
+    assert window.profile_scans.currentText() == "dave*"
+    assert not window.next_to_scan_button.isEnabled()
+
+
 def test_profile_list_filter_is_explicit_and_matches_usernames(window, qtbot, tmp_path):
     path = tmp_path / "profiles.txt"
     path.write_text("https://www.tiktok.com/@Alice\n@malice2\n@bob\n", encoding="utf-8")
