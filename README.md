@@ -43,7 +43,7 @@ Pause and Stop work between streamed 64 KiB chunks. An active network read can w
 up to its 120-second timeout; **Cancel / Reset** interrupts that wait.
 Partial downloads use `.part` and become final files only on completion.
 
-Files use `username/Videos/id_HD.mp4` and `username/Images/id_1.jpg`.
+Files use `username/video/id_HD.mp4` and `username/photo/id_1.jpg`.
 Existing final videos skip the metadata request as well as the transfer.
 The provider's `hdplay` URL is used; `wmplay` is never used.
 Requests identify this app with `User-Agent: TikTokDownloader2/2.0`.
@@ -53,7 +53,9 @@ time spent transferring files counts toward that interval. Carousel photos downl
 consecutively without a pacing delay.
 The 10-second browser scrolling interval applies only to profile scanning.
 
-Settings are stored separately under Qt's per-user AppConfigLocation.
+Settings use platformdirs' per-user config directory: `%LOCALAPPDATA%\TikTokDownloader2`
+on Windows. Preferences are saved in `config.json`, and profile, destination, and
+window geometry are saved in `state.json`.
 Chromium is the default; settings also allow an explicit installed browser.
 Firefox needs `python -m playwright install firefox` in this environment.
 

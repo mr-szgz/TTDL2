@@ -87,7 +87,7 @@ class MainWindow(QMainWindow):
         self.status_timer = QTimer(self)
         self.status_timer.setInterval(1000)
         self.status_timer.timeout.connect(self.show_work_status)
-        self.setWindowTitle("TikTok Downloader 2")
+        self.setWindowTitle(f"ttdl2 - v{__version__}")
         self.resize(840, 660)
         self.setMinimumSize(500, 480)
         if self.settings.window_geometry:
@@ -182,8 +182,6 @@ class MainWindow(QMainWindow):
         self.settings_action = menu.addAction("&Settings…", self.edit_settings)
         self.save_config_action = menu.addAction("&Save config", self.save_config)
         self.reset_action = menu.addAction("Restore &Defaults", self.reset_defaults)
-        self.import_action = menu.addAction("&Import settings…", self.import_settings)
-        menu.addAction("&Export settings…", self.export_settings)
         menu.addSeparator()
         menu.addAction("E&xit", self.close)
         self.menuBar().addMenu("&Help").addAction("&About", self.about)
@@ -225,18 +223,6 @@ class MainWindow(QMainWindow):
         self.settings = self.preferences.values
         self.apply_settings()
         self.statusBar().showMessage("Defaults restored. Click Save config to keep these values.")
-
-    def import_settings(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import settings", "", "JSON (*.json)")
-        if path:
-            self.settings = AppConfig.model_validate_json(Path(path).read_text(encoding="utf-8"))
-            self.apply_settings()
-            self.save_config()
-
-    def export_settings(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export settings", "settings.json", "JSON (*.json)")
-        if path:
-            AppConfig.model_validate(self.settings.model_dump() | self.current_state().model_dump()).save(Path(path))
 
     def about(self):
         QMessageBox.about(self, "About TikTok Downloader 2", f"TikTok Downloader {__version__}\nPython · PySide6 · Playwright\n\nBased on TikTok Downloader\n© 2024 Jettcodey · MIT License")
@@ -298,7 +284,6 @@ class MainWindow(QMainWindow):
         self.inputs.setEnabled(not busy)
         self.download.setEnabled(not busy)
         self.settings_action.setEnabled(not busy)
-        self.import_action.setEnabled(not busy)
         self.reset_action.setEnabled(not busy)
         self.pause.setEnabled(busy)
         self.stop.setEnabled(busy)

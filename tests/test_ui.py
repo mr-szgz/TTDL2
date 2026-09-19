@@ -161,7 +161,7 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     window.source.setText("@another")
     assert not window.download_videos.isEnabled()
     assert server[1]["/api/hd"] == 2
-    assert (Path(job.folder) / "alice" / "Videos" / "123_HD.mp4").exists()
+    assert (Path(job.folder) / "alice" / "video" / "123_HD.mp4").exists()
     assert window.download.isEnabled()
     assert not window.start_indexing.isEnabled()
     assert "Indexed 1 unique posts — 1 new posts found" in statuses
@@ -303,7 +303,7 @@ def test_cancel_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
         origin = f"http://127.0.0.1:{http.server_port}"
         job = Job(source="@alice", folder=str(tmp_path), hd_api=origin + "/api/")
         window.start_job(job, [origin + "/@alice/video/123"])
-        partial = tmp_path / "alice" / "Videos" / "123_HD.mp4.part"
+        partial = tmp_path / "alice" / "video" / "123_HD.mp4.part"
         qtbot.waitUntil(lambda: transferring.is_set() and partial.exists() and partial.stat().st_size > 0,
                         timeout=10000)
         if action == "reset":
@@ -356,7 +356,7 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source):
     assert not window.restore_scan_button.isEnabled()
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     assert window.statusBar().currentMessage() == "Completed"
-    assert (folder / "alice" / "Videos" / "123_HD.mp4").exists()
+    assert (folder / "alice" / "video" / "123_HD.mp4").exists()
     assert server[1]["/@alice"] == 0
     assert server[1]["/api/hd"] == 2
 

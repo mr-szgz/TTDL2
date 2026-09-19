@@ -2,7 +2,7 @@ import json
 
 import pytest
 from pydantic import ValidationError
-from PySide6.QtWidgets import QDialog, QFileDialog
+from PySide6.QtWidgets import QDialog
 
 from tiktok_downloader.app import MainWindow, SettingsDialog
 from tiktok_downloader.settings import AppConfig, AppState, Settings
@@ -87,24 +87,3 @@ def test_settings_dialog_save_cancel_and_paths(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(SettingsDialog, "exec", lambda _: QDialog.DialogCode.Rejected)
     window.edit_settings()
     assert window.preferences.config_path.read_bytes() == before
-
-
-def test_export_and_import_all_settings(qtbot, tmp_path, monkeypatch):
-    window = MainWindow(tmp_path / "original")
-    qtbot.addWidget(window)
-    window.source.setText("@exported")
-    window.destination.setText(str(tmp_path / "media"))
-    window.settings.browser = "chrome"
-    path = tmp_path / "export.json"
-    monkeypatch.setattr(QFileDialog, "getSaveFileName", lambda *args: (str(path), ""))
-    window.export_settings()
-    assert not window.preferences.config_path.exists()
-    assert not window.preferences.state_path.exists()
-    imported = MainWindow(tmp_path / "imported")
-    qtbot.addWidget(imported)
-    monkeypatch.setattr(QFileDialog, "getOpenFileName", lambda *args: (str(path), ""))
-    imported.import_settings()
-    assert imported.source.text() == "@exported"
-    assert imported.destination.text() == str(tmp_path / "media")
-    assert Settings(tmp_path / "imported").values.browser == "chrome"
-    assert Settings(tmp_path / "imported").values.source == "@exported"

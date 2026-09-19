@@ -11,9 +11,9 @@ def test_hd_mass_download(job_factory, server):
     downloader = Downloader(job, events.append, Control())
     downloader.run(downloader.scan())
     root = Path(job.folder) / "alice"
-    assert (root / "Videos" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
+    assert (root / "video" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/hd.mp4"
     for i in (1, 2):
-        assert (root / "Images" / f"456_{i}.jpg").read_bytes() == f"fixture-media:/media/{i}.jpg".encode()
+        assert (root / "photo" / f"456_{i}.jpg").read_bytes() == f"fixture-media:/media/{i}.jpg".encode()
     assert (Path(job.folder) / "alice_combined_links.txt").read_text().splitlines() == [
         server[0] + "/@alice/video/123", server[0] + "/@alice/photo/456"]
     assert (root / "123_HD.json").exists()
@@ -50,7 +50,7 @@ def test_stop_during_download(job_factory):
     events = []
     def emit(event):
         events.append(event)
-        if event["type"] == "log" and "/Videos/" in event["message"].replace("\\", "/") and event["message"].startswith("Saved"):
+        if event["type"] == "log" and "/video/" in event["message"].replace("\\", "/") and event["message"].startswith("Saved"):
             control.stop()
     downloader = Downloader(job, emit, control)
     downloader.run(downloader.scan())
@@ -137,7 +137,7 @@ def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
     assert len(set(connections)) == 1
     assert metadata_times[1] - metadata_times[0] >= 1.0
     assert elapsed < 3  # The old 1.9-second delay alone took 5.7 seconds.
-    assert (tmp_path / "alice" / "Videos" / "123_HD.mp4").read_bytes() == payload
+    assert (tmp_path / "alice" / "video" / "123_HD.mp4").read_bytes() == payload
     for i in (1, 2):
-        assert (tmp_path / "alice" / "Images" / f"456_{i}.jpg").read_bytes() == payload
+        assert (tmp_path / "alice" / "photo" / f"456_{i}.jpg").read_bytes() == payload
     assert sum(event["bytes"] for event in events if event["type"] == "transfer") == 3 * len(payload)
