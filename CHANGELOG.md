@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.2] - 2026-09-19
+
+### Added
+
+- Add configurable video and image download folder names under **Scanning & Downloads**, defaulting to `video` and `photo`.
+- Show the API JSON output folder template beside the API save controls.
+
+### Changed
+
+- Save API JSON responses under each profile's `<username>/Data/json` folder.
+- Place the saved state path directly below the user configuration path controls.
+
 ## [3.4.1] - 2026-09-19
 
 ### Changed
@@ -111,7 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.1...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.2...HEAD
+[3.4.2]: https://github.com/mr-szgz/ttdl2/compare/v3.4.1...v3.4.2
 [3.4.1]: https://github.com/mr-szgz/ttdl2/compare/v3.4.0...v3.4.1
 [3.4.0]: https://github.com/mr-szgz/ttdl2/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.3.0
