@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.2.1] - 2026-09-19
+
+### Changed
+
+- Package the settings persistence and profile-list improvements for the Windows release.
+
 ## [3.2.0] - 2026-09-19
 
 ### Added
@@ -72,8 +78,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.2.0...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.2.1...HEAD
 [3.2.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.2.0
 [3.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.1.0
 [3.0.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.0.0
 [2.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v2.1.0
+
+[3.2.1]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.2.1

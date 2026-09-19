@@ -14,7 +14,7 @@ Desktop-chromium based application to mass download TikTok profile videos and ph
 
 ## Install
 
-[Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.2.0/TTDL2-3.2.0-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)
+[Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.2.1/TTDL2-3.2.1-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)
 
 ### Run from source:
 

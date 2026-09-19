@@ -191,7 +191,8 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.source.geometry().bottom() < window.profile_scans.geometry().top()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
-    assert window.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
+    assert window.download_tab.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
+    assert window.settings_tab.findChildren(QCheckBox) == [window.remember_settings]
     assert window.auto_download.isChecked()
     assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
     assert window.auto_download.geometry().top() > window.download.geometry().bottom()
