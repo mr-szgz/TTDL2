@@ -408,7 +408,8 @@ class MainWindow(QMainWindow):
         self.browser.currentTextChanged.connect(self.check_browser)
         self.executable.textChanged.connect(self.check_browser)
         self.check_browser()
-        self.load_profile_list()
+        if Path(self.profile_list.text()).is_file():
+            self.load_profile_list()
         self.profile_usernames.setCurrentIndex(self.profile_usernames.findText(self.settings.selected_username))
 
     def check_browser(self):

@@ -136,7 +136,8 @@ def test_profile_list_username_selection_is_one_way(window, qtbot, tmp_path):
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
     assert [window.profile_usernames.itemText(i) for i in range(4)] == ["", "alice", "bob", "carol"]
     assert window.load_profile_list_button.geometry().bottom() < window.profile_usernames.geometry().top()
-    assert window.profile_usernames.geometry().bottom() < window.source.geometry().top()
+    assert (window.profile_usernames.mapTo(window, window.profile_usernames.rect().bottomLeft()).y()
+            < window.source.mapTo(window, window.source.rect().topLeft()).y())
     assert window.prev_profile_button.geometry().top() == window.profile_usernames.geometry().top()
     assert window.next_profile_button.geometry().top() == window.profile_usernames.geometry().top()
     window.profile_usernames.setCurrentIndex(2)
@@ -183,7 +184,8 @@ def test_profile_list_filter_is_explicit_and_matches_usernames(window, qtbot, tm
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
     assert window.profile_filter.placeholderText() == "Enter text to filter usernames"
     assert window.profile_usernames.geometry().bottom() < window.profile_filter.geometry().top()
-    assert window.profile_filter.geometry().bottom() < window.source.geometry().top()
+    assert (window.profile_filter.mapTo(window, window.profile_filter.rect().bottomLeft()).y()
+            < window.source.mapTo(window, window.source.rect().topLeft()).y())
     assert window.profile_filter.geometry().top() == window.filter_profiles_button.geometry().top()
     qtbot.keyClicks(window.profile_filter, "LIcE")
     assert window.profile_usernames.count() == 4
@@ -217,7 +219,9 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
     assert window.download_tab.findChildren(QCheckBox) == [window.checks["images_only"], window.checks["notifications"], window.auto_download]
-    assert window.settings_tab.findChildren(QCheckBox) == [window.checks["json_logs"], window.checks["download_logs"], window.remember_settings]
+    assert window.settings_tab.findChildren(QCheckBox) == [window.remember_settings, window.checks["json_logs"], window.checks["download_logs"]]
+    assert window.scan_delay.parentWidget().title() == "Scan Profiles"
+    assert window.open_profile_downloads_button.text() == "Open profile downloads"
     assert window.auto_download.isChecked()
     assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.progress.mapTo(window, window.progress.rect().topLeft()).y()
     assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.download.mapTo(window, window.download.rect().topLeft()).y()

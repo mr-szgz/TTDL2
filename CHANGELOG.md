@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-09-19
+
+### Added
+
+- Add a **Next to Scan** button that advances to the next profile without saved scan results.
+- Add controls to refresh saved scans and sync their usernames to the profile list.
+
 ### Changed
 
+- Automatically save and reuse the browser session during profile setup and scanning; replace the manual session controls with **New Session** and **Clear Session**.
+- Reorganize the **Downloader** tab into **Profiles List**, **Scan Profiles**, and **Downloads** sections, move **Scan delay** alongside the scan controls, and rename the profile-folder action to **Open profile downloads**.
+- Keep **Remember settings** and the download logging options in the main Settings list while leaving **Save Settings** and **Restore Defaults** in the footer.
 - Store per-profile download index files in the app data directory instead of profile download folders.
+
+### Fixed
+
+- Start normally when the default profile-list file has not been created yet.
+- Allow an active profile scan to stop promptly while waiting between page scrolls.
 
 ## [3.3.0] - 2026-09-19
 
@@ -89,7 +104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.3.0...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.0...HEAD
+[3.4.0]: https://github.com/mr-szgz/ttdl2/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.3.0
 [3.2.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.2.0
 [3.1.0]: https://github.com/mr-szgz/ttdl2/releases/tag/v3.1.0
