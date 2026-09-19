@@ -10,13 +10,13 @@ import sys
 from PySide6.QtCore import QByteArray, QProcess, QSize, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox,
-    QFileDialog, QFormLayout, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QPlainTextEdit, QProgressBar, QPushButton, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
+    QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
+    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 from playwright.sync_api import sync_playwright
 
-from .core import Job, profile_name, read_links, system_browser
+from .core import Job, filename_component, profile_name, read_links, system_browser
 from . import __version__
 from .progress import DownloadProgress
 from .settings import AppState, CONFIG_DIR, Settings
@@ -81,28 +81,42 @@ class MainWindow(QMainWindow):
         title_row.addWidget(self.repository_button)
         layout.addLayout(title_row)
         self.tabs = QTabWidget()
-        self.download_tab = QWidget()
-        self.settings_tab = QWidget()
+        self.download_tab = QScrollArea()
+        self.download_tab.setWidgetResizable(True)
+        self.download_tab.setFrameShape(QFrame.Shape.NoFrame)
+        download_content = QWidget()
+        self.download_tab.setWidget(download_content)
+        self.settings_tab = QScrollArea()
+        self.settings_tab.setWidgetResizable(True)
+        self.settings_tab.setFrameShape(QFrame.Shape.NoFrame)
+        settings_content = QWidget()
+        self.settings_tab.setWidget(settings_content)
         self.tabs.addTab(self.download_tab, "Download")
         self.tabs.addTab(self.settings_tab, "Settings")
         layout.addWidget(self.tabs, 1)
-        layout = QVBoxLayout(self.download_tab)
+        layout = QVBoxLayout(download_content)
         layout.setSpacing(12)
         self.inputs = QWidget()
         form = QFormLayout(self.inputs)
         form.setContentsMargins(0, 8, 0, 8)
+        profiles_group = QGroupBox("Profiles List")
+        profiles_form = QFormLayout(profiles_group)
+        form.addRow(profiles_group)
         self.profiles = []
         self.profile_list = QLineEdit(str(Path(self.settings.folder) / "ttdl2.txt"))
         self.profile_list.setObjectName("profileList")
-        self.profile_list.setAccessibleName("Profile List")
-        profile_list_label = QLabel("Profile &List")
+        self.profile_list.setAccessibleName("File")
+        profile_list_label = QLabel("&File")
         profile_list_label.setBuddy(self.profile_list)
-        form.addRow(profile_list_label, self.profile_list)
-        profile_actions = QHBoxLayout()
-        self.open_profile_list_button = QPushButton("Open Profile List")
+        profile_list_row = QHBoxLayout()
+        profile_list_row.addWidget(self.profile_list, 1)
+        self.open_profile_list_button = QPushButton("Open List File")
         self.open_profile_list_button.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl.fromLocalFile(self.profile_list.text())))
-        self.load_profile_list_button = QPushButton("&Load Profile List")
+        profile_list_row.addWidget(self.open_profile_list_button)
+        profiles_form.addRow(profile_list_label, profile_list_row)
+        profile_actions = QHBoxLayout()
+        self.load_profile_list_button = QPushButton("&Load List File")
         self.load_profile_list_button.clicked.connect(self.load_profile_list)
         self.sort_file_button = QPushButton("Sort file")
         self.sort_file_button.clicked.connect(self.sort_profile_list)
@@ -114,32 +128,58 @@ class MainWindow(QMainWindow):
             self.profile_usernames.currentIndex() - 1))
         self.next_profile_button.setEnabled(False)
         self.prev_profile_button.setEnabled(False)
-        profile_actions.addWidget(self.open_profile_list_button)
         profile_actions.addWidget(self.load_profile_list_button)
         profile_actions.addWidget(self.sort_file_button)
         profile_actions.addStretch()
-        form.addRow("", profile_actions)
+        profiles_form.addRow("", profile_actions)
         self.profile_usernames = QComboBox()
         self.profile_usernames.setObjectName("profileUsernames")
         self.profile_usernames.setAccessibleName("Profile list usernames")
-        self.profile_usernames.addItem("- select profile -", None)
+        self.profile_usernames.addItem("", None)
         self.profile_usernames.currentIndexChanged.connect(self.select_profile)
-        usernames_label = QLabel("Usernames")
+        usernames_label = QLabel("Username")
         usernames_label.setBuddy(self.profile_usernames)
         usernames_row = QHBoxLayout()
         usernames_row.addWidget(self.profile_usernames, 1)
         usernames_row.addWidget(self.prev_profile_button)
         usernames_row.addWidget(self.next_profile_button)
-        form.addRow(usernames_label, usernames_row)
+        profiles_form.addRow(usernames_label, usernames_row)
         filter_row = QHBoxLayout()
         self.profile_filter = QLineEdit()
-        self.profile_filter.setPlaceholderText("filter")
+        self.profile_filter.setPlaceholderText("Enter text to filter usernames")
         self.profile_filter.setAccessibleName("Filter profile usernames")
         self.filter_profiles_button = QPushButton("Filter")
         self.filter_profiles_button.clicked.connect(self.filter_profiles)
         filter_row.addWidget(self.profile_filter, 1)
         filter_row.addWidget(self.filter_profiles_button)
-        form.addRow("", filter_row)
+        profiles_form.addRow("", filter_row)
+        scans_row = QHBoxLayout()
+        self.profile_scans = QComboBox()
+        self.profile_scans.setObjectName("profileScans")
+        self.profile_scans.setAccessibleName("Results")
+        scans_row.addWidget(self.profile_scans, 1)
+        self.restore_scan_button = QPushButton("&Restore")
+        self.restore_scan_button.clicked.connect(self.restore_scan)
+        self.profile_scans.currentIndexChanged.connect(lambda: self.restore_scan_button.setEnabled(
+            self.profile_scans.isEnabled() and self.profile_scans.currentIndex() >= 0
+            and not self.profile_scans.currentText().endswith("*")))
+        scans_row.addWidget(self.restore_scan_button)
+        scans_label = QLabel("Res&ults")
+        scans_label.setBuddy(self.profile_scans)
+        sync_scans_row = QHBoxLayout()
+        self.sync_scans_button = QPushButton("Sync scans to file")
+        self.sync_scans_button.setObjectName("syncScans")
+        self.sync_scans_button.clicked.connect(self.sync_scanned_profiles)
+        sync_scans_row.addWidget(self.sync_scans_button)
+        self.refresh_scans_button = QPushButton("Refresh Scans")
+        self.refresh_scans_button.setObjectName("refreshScans")
+        self.refresh_scans_button.clicked.connect(self.refresh_profile_scans)
+        sync_scans_row.addWidget(self.refresh_scans_button)
+        sync_scans_row.addStretch()
+        self.refresh_profile_scans()
+        profile_group = QGroupBox("Scan Profiles")
+        profile_form = QFormLayout(profile_group)
+        form.addRow(profile_group)
         source_row = QHBoxLayout()
         self.source = QLineEdit(self.settings.source)
         self.source.setObjectName("source")
@@ -150,21 +190,14 @@ class MainWindow(QMainWindow):
         self.check_profile_button.clicked.connect(lambda: QDesktopServices.openUrl(
             QUrl(f"https://www.tiktok.com/@{profile_name(self.source.text())}")))
         source_row.addWidget(self.check_profile_button)
-        source_label = QLabel("&Profile")
+        source_label = QLabel("&URL or Username")
         source_label.setBuddy(self.source)
-        form.addRow(source_label, source_row)
-        scans_row = QHBoxLayout()
-        self.profile_scans = QComboBox()
-        self.profile_scans.setObjectName("profileScans")
-        self.profile_scans.setAccessibleName("Profile Scans")
-        scans_row.addWidget(self.profile_scans, 1)
-        self.restore_scan_button = QPushButton("&Restore Scan")
-        self.restore_scan_button.clicked.connect(self.restore_scan)
-        scans_row.addWidget(self.restore_scan_button)
-        scans_label = QLabel("Profile S&cans")
-        scans_label.setBuddy(self.profile_scans)
-        form.addRow(scans_label, scans_row)
-        self.refresh_profile_scans()
+        profile_form.addRow(source_label, source_row)
+        profile_form.addRow(scans_label, scans_row)
+        profile_form.addRow("", sync_scans_row)
+        download_group = QGroupBox("Downloads")
+        download_form = QFormLayout(download_group)
+        form.addRow(download_group)
         destination_row = QHBoxLayout()
         self.destination = QLineEdit(self.settings.folder)
         self.destination.setObjectName("destination")
@@ -175,48 +208,79 @@ class MainWindow(QMainWindow):
         change.clicked.connect(self.choose_folder)
         destination_row.addWidget(self.destination, 1)
         destination_row.addWidget(change)
-        destination_label = QLabel("Downloads")
+        destination_label = QLabel("Folder")
         destination_label.setBuddy(self.destination)
-        form.addRow(destination_label, destination_row)
+        download_form.addRow(destination_label, destination_row)
         options = QHBoxLayout()
         self.checks = {}
-        for key, title in [("images_only", "Images only"), ("json_logs", "Save API JSON"),
-                           ("download_logs", "Save download log"), ("notifications", "Alert on completion")]:
+        for key, title in [("images_only", "Images only"), ("notifications", "Alert on completion")]:
             check = QCheckBox(title)
             check.setChecked(getattr(self.settings, key))
             check.toggled.connect(lambda checked, name=key: self.update_option(name, checked))
             self.checks[key] = check
             options.addWidget(check)
+        self.auto_download = QCheckBox("&Auto download after scans")
+        self.auto_download.setChecked(True)
+        options.addWidget(self.auto_download)
+        self.scan_delay = QDoubleSpinBox()
+        self.scan_delay.setObjectName("scanDelay")
+        self.scan_delay.setAccessibleName("Delay in seconds")
+        self.scan_delay.setRange(0, 3600)
+        self.scan_delay.setDecimals(1)
+        self.scan_delay.setSingleStep(0.1)
+        self.scan_delay.setSuffix(" s")
+        self.scan_delay.setToolTip("Delay between profile-scanning scrolls")
+        self.scan_delay.setValue(self.settings.scroll_ms / 1000)
+        self.scan_delay.valueChanged.connect(lambda seconds: self.update_option("scroll_ms", round(seconds * 1000)))
+        scan_delay_label = QLabel("Scan &delay")
+        scan_delay_label.setBuddy(self.scan_delay)
+        options.addWidget(scan_delay_label)
+        options.addWidget(self.scan_delay)
         options.addStretch()
+        download_form.addRow(options)
         open_folder = QPushButton("Open &Downloads")
         open_folder.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(self.destination.text())))
-        form.addRow(options)
+        self.input_controls = (profiles_group, self.source, self.check_profile_button, self.destination, change,
+                               self.profile_scans, self.sync_scans_button, self.refresh_scans_button)
         layout.addWidget(self.inputs)
         actions = QHBoxLayout()
-        self.download = QPushButton("Create &Session")
+        self.download = QPushButton("&New Session")
+        self.download.setToolTip("Open a fresh browser session for login; save it automatically")
         self.download.setObjectName("downloadButton")
         self.download.clicked.connect(self.start_download)
-        self.save_session_button = QPushButton("Sa&ve Session")
-        self.save_session_button.setObjectName("saveSessionButton")
-        self.save_session_button.setToolTip("Save browser cookies, local storage, and IndexedDB after logging in")
-        self.save_session_button.setEnabled(False)
-        self.save_session_button.clicked.connect(self.save_browser_session)
-        self.restore_session_button = QPushButton("Res&tore Session")
-        self.restore_session_button.setObjectName("restoreSessionButton")
-        self.restore_session_button.setToolTip("Open a browser using the saved session")
-        self.restore_session_button.setEnabled(self.preferences.session_path.is_file())
-        self.restore_session_button.clicked.connect(lambda: self.start_download(restore_session=True))
         self.start_indexing = QPushButton("&Scan Profile")
         self.start_indexing.setObjectName("startIndexingButton")
-        self.start_indexing.setEnabled(False)
         self.start_indexing.clicked.connect(self.begin_indexing)
-        self.reset_session_button = QPushButton("&Reset session")
+        profile_actions = QHBoxLayout()
+        profile_actions.addWidget(self.start_indexing)
+        self.open_profile_downloads_button = QPushButton("Open Downloads")
+        self.open_profile_downloads_button.setToolTip("Open the current profile's download folder")
+        self.open_profile_downloads_button.clicked.connect(self.open_profile_downloads)
+        profile_actions.addWidget(self.open_profile_downloads_button)
+        profile_actions.addStretch()
+        profile_separator = QFrame()
+        profile_separator.setFrameShape(QFrame.Shape.HLine)
+        profile_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        profile_form.addRow(profile_separator)
+        profile_form.addRow(profile_actions)
+        self.reset_session_button = QPushButton("&Clear Session")
         self.reset_session_button.setObjectName("resetSessionButton")
-        self.reset_session_button.setToolTip("Clear the current scan, progress, and log after work has stopped")
+        self.reset_session_button.setToolTip("Delete saved browser cookies, local storage, and IndexedDB")
+        self.reset_session_button.setEnabled(self.preferences.session_path.is_file())
         self.reset_session_button.clicked.connect(self.reset_session)
         self.download_videos = QPushButton("&Download Profile")
         self.download_videos.setEnabled(False)
         self.download_videos.clicked.connect(lambda: self.start_job(self.scanned_job, self.scanned_links))
+        download_actions = QHBoxLayout()
+        download_actions.addWidget(self.download_videos)
+        download_actions.addWidget(open_folder)
+        download_actions.addStretch()
+        download_separator = QFrame()
+        download_separator.setFrameShape(QFrame.Shape.HLine)
+        download_separator.setFrameShadow(QFrame.Shadow.Sunken)
+        download_form.addRow(download_separator)
+        download_form.addRow(download_actions)
+        self.inputs.setMinimumHeight(self.inputs.minimumSizeHint().height())
         self.source.textChanged.connect(self.clear_scan)
         self.destination.textChanged.connect(self.clear_scan)
         self.pause = QPushButton("&Pause")
@@ -227,22 +291,14 @@ class MainWindow(QMainWindow):
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
         actions.addWidget(self.download)
-        actions.addWidget(self.save_session_button)
-        actions.addWidget(self.restore_session_button)
         actions.addWidget(self.reset_session_button)
         actions.addStretch()
         layout.addLayout(actions)
         actions = QHBoxLayout()
-        actions.addWidget(self.start_indexing)
-        actions.addWidget(self.download_videos)
         actions.addWidget(self.pause)
         actions.addWidget(self.stop)
-        actions.addWidget(open_folder)
         actions.addStretch()
         layout.addLayout(actions)
-        self.auto_download = QCheckBox("&Automatically download videos")
-        self.auto_download.setChecked(True)
-        layout.addWidget(self.auto_download)
         self.progress = QProgressBar()
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
@@ -262,7 +318,7 @@ class MainWindow(QMainWindow):
         log_actions.addWidget(self.copy_logs_button)
         layout.addLayout(log_actions)
         self.statusBar().showMessage("Ready")
-        settings_layout = QVBoxLayout(self.settings_tab)
+        settings_layout = QVBoxLayout(settings_content)
         settings_form = QFormLayout()
         self.browser = QComboBox()
         self.browser.addItems(["system", "chromium", "chrome", "msedge", "firefox"])
@@ -303,6 +359,9 @@ class MainWindow(QMainWindow):
         self.state_path = QLineEdit(str(self.preferences.state_path))
         self.state_path.setReadOnly(True)
         settings_form.addRow("Saved state path", self.state_path)
+        self.session_path = QLineEdit(str(self.preferences.session_path))
+        self.session_path.setReadOnly(True)
+        settings_form.addRow("Browser session file", self.session_path)
         self.scan_path = QLineEdit(str(self.preferences.scan_dir))
         self.scan_path.setReadOnly(True)
         settings_form.addRow("Saved scans folder", self.scan_path)
@@ -315,6 +374,16 @@ class MainWindow(QMainWindow):
         settings_form.addRow("", scan_actions)
         settings_layout.addLayout(settings_form)
         settings_layout.addStretch()
+        downloads_group = QGroupBox("Downloads")
+        downloads_options = QHBoxLayout(downloads_group)
+        for key, title in [("json_logs", "Save API JSON"), ("download_logs", "Save download log")]:
+            check = QCheckBox(title)
+            check.setChecked(getattr(self.settings, key))
+            check.toggled.connect(lambda checked, name=key: self.update_option(name, checked))
+            self.checks[key] = check
+            downloads_options.addWidget(check)
+        downloads_options.addStretch()
+        settings_layout.addWidget(downloads_group)
         settings_separator = QFrame()
         settings_separator.setFrameShape(QFrame.Shape.HLine)
         settings_separator.setFrameShadow(QFrame.Shadow.Sunken)
@@ -336,6 +405,8 @@ class MainWindow(QMainWindow):
         self.browser.currentTextChanged.connect(self.check_browser)
         self.executable.textChanged.connect(self.check_browser)
         self.check_browser()
+        self.load_profile_list()
+        self.profile_usernames.setCurrentIndex(self.profile_usernames.findText(self.settings.selected_username))
 
     def check_browser(self):
         browser = self.browser.currentText()
@@ -385,7 +456,6 @@ class MainWindow(QMainWindow):
     def browser_install_finished(self, code, status):
         self.read_browser_install_output()
         self.set_busy(False)
-        self.reset_session_button.setEnabled(True)
         self.download_videos.setEnabled(bool(self.scanned_links))
         self.check_browser()
         self.statusBar().showMessage(f"Browser installer exited with code {code}")
@@ -401,7 +471,7 @@ class MainWindow(QMainWindow):
         query = self.profile_filter.text().casefold()
         self.profile_usernames.blockSignals(True)
         self.profile_usernames.clear()
-        self.profile_usernames.addItem("- select profile -", None)
+        self.profile_usernames.addItem("", None)
         for profile in self.profiles:
             username = profile_name(profile)
             if query in username.casefold():
@@ -418,12 +488,37 @@ class MainWindow(QMainWindow):
         path.write_text("\n".join(lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
         self.statusBar().showMessage("Profile list file sorted.")
 
+    def sync_scanned_profiles(self):
+        path = Path(self.profile_list.text())
+        text = path.read_text(encoding="utf-8-sig")
+        usernames = {profile_name(line.strip()).casefold()
+                     for line in text.splitlines() if line.strip()}
+        additions = []
+        for scan in sorted(self.preferences.scan_dir.glob("*_combined_links.txt")):
+            username = profile_name(scan.name.removesuffix("_combined_links.txt"))
+            if username.casefold() not in usernames:
+                additions.append(f"@{username}")
+                usernames.add(username.casefold())
+        if additions:
+            with path.open("a", encoding="utf-8") as file:
+                if text and not text.endswith("\n"):
+                    file.write("\n")
+                file.write("\n".join(additions) + "\n")
+        self.load_profile_list()
+        self.statusBar().showMessage(f"Added {len(additions)} scanned usernames to profile list.")
+
     def select_profile(self, index):
         profile = self.profile_usernames.itemData(index)
         if profile is not None:
             self.source.setText(profile)
+            self.refresh_profile_scans()
         self.prev_profile_button.setEnabled(index > 0)
         self.next_profile_button.setEnabled(index < self.profile_usernames.count() - 1)
+
+    def open_profile_downloads(self):
+        folder = Path(self.destination.text()) / filename_component(profile_name(self.source.text()))
+        folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def choose_folder(self):
         path = QFileDialog.getExistingDirectory(self, "Download folder", self.destination.text())
@@ -432,6 +527,7 @@ class MainWindow(QMainWindow):
 
     def current_state(self):
         return AppState(source=self.source.text(), folder=self.destination.text(),
+                        selected_username=self.profile_usernames.currentText(),
                         window_geometry=bytes(self.saveGeometry().toHex()).decode("ascii"))
 
     def update_option(self, name, checked):
@@ -447,8 +543,10 @@ class MainWindow(QMainWindow):
 
     def apply_settings(self):
         self.remember_settings.setChecked(self.settings.remember_settings)
+        self.scan_delay.setValue(self.settings.scroll_ms / 1000)
         self.source.setText(self.settings.source)
         self.destination.setText(self.settings.folder)
+        self.profile_usernames.setCurrentIndex(self.profile_usernames.findText(self.settings.selected_username))
         self.browser.setCurrentText(self.settings.browser)
         self.executable.setText(self.settings.executable)
         for name, check in self.checks.items():
@@ -466,16 +564,10 @@ class MainWindow(QMainWindow):
         self.apply_settings()
         self.statusBar().showMessage("Defaults restored. Click Save Settings to keep these values.")
 
-    def start_download(self, checked=False, *, restore_session=False):
-        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications", "remember_settings"})
+    def start_download(self, checked=False):
+        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
         self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
-                           restore_session=restore_session, **settings))
-
-    def save_browser_session(self):
-        self.save_session_button.setEnabled(False)
-        self.start_indexing.setEnabled(False)
-        self.process.write(b"save_session\n")
-        self.statusBar().showMessage("Saving browser session…")
+                           new_session=True, **settings))
 
     def clear_scan(self):
         self.scanned_links = None
@@ -483,14 +575,25 @@ class MainWindow(QMainWindow):
         self.download_videos.setEnabled(False)
 
     def refresh_profile_scans(self):
-        selected = self.profile_scans.currentText()
+        selected = self.profile_scans.currentText().removesuffix("*")
+        profile = self.profile_usernames.currentData()
+        if profile is not None:
+            selected = profile_name(profile)
         self.profile_scans.clear()
         self.profile_scans.addItems(sorted(
             path.name.removesuffix("_combined_links.txt")
             for path in self.preferences.scan_dir.glob("*_combined_links.txt")))
         if selected:
-            self.profile_scans.setCurrentText(selected)
-        self.restore_scan_button.setEnabled(self.profile_scans.count() > 0)
+            scan_index = next((index for index in range(self.profile_scans.count())
+                               if self.profile_scans.itemText(index).casefold() == selected.casefold()), -1)
+            if scan_index < 0:
+                self.profile_scans.addItem(f"{selected}*")
+                scan_index = self.profile_scans.count() - 1
+                self.profile_scans.model().item(scan_index).setEnabled(False)
+            self.profile_scans.setCurrentIndex(scan_index)
+        self.restore_scan_button.setEnabled(
+            self.profile_scans.isEnabled() and self.profile_scans.currentIndex() >= 0
+            and not self.profile_scans.currentText().endswith("*"))
 
     def restore_scan(self):
         self.clear_scan()
@@ -499,14 +602,14 @@ class MainWindow(QMainWindow):
         if path.exists():
             self.source.setText(f"https://www.tiktok.com/@{username.lstrip('@')}")
             self.scanned_links = read_links(path)
-            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "notifications", "remember_settings"})
+            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
             self.scanned_job = Job(source=self.source.text(), folder=self.destination.text(), **settings)
             self.download_progress = None
             self.paused = self.stopping = False
             self.progress.setRange(0, max(len(self.scanned_links), 1))
             self.progress.setValue(0)
             self.progress.setFormat(f"{len(self.scanned_links)} scanned posts")
-            self.work_status = f"Scan restored — {len(self.scanned_links)} total results."
+            self.work_status = f"Scan restored — {len(self.scanned_links)} results."
             self.log.appendPlainText(f"{self.work_status} Loaded {path}")
             self.statusBar().showMessage(self.work_status)
             self.download_videos.setEnabled(bool(self.scanned_links))
@@ -541,12 +644,17 @@ class MainWindow(QMainWindow):
         self.process.write((json.dumps({"job": asdict(job), "links": links}) + "\n").encode())
 
     def set_busy(self, busy):
-        self.reset_session_button.setEnabled(not busy)
-        self.inputs.setEnabled(not busy)
+        self.start_indexing.setEnabled(not busy)
+        self.scan_delay.setEnabled(not busy)
+        self.reset_session_button.setEnabled(not busy and self.preferences.session_path.is_file())
+        for control in self.input_controls:
+            control.setEnabled(not busy)
+        self.restore_scan_button.setEnabled(not busy and self.profile_scans.currentIndex() >= 0
+                                            and not self.profile_scans.currentText().endswith("*"))
+        for control in (self.checks["images_only"], self.checks["notifications"], self.auto_download):
+            control.setEnabled(not busy)
         self.download_videos.setEnabled(not busy and bool(self.scanned_links))
         self.download.setEnabled(not busy)
-        self.save_session_button.setEnabled(False)
-        self.restore_session_button.setEnabled(not busy and self.preferences.session_path.is_file())
         self.settings_tab.setEnabled(not busy)
         self.pause.setEnabled(busy)
         self.stop.setEnabled(busy)
@@ -563,22 +671,25 @@ class MainWindow(QMainWindow):
         self.show_work_status()
 
     def begin_indexing(self):
+        if self.process.state() == QProcess.ProcessState.NotRunning:
+            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
+            self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
+                               manual_start=False, **settings))
+            return
         if self.settings.remember_settings:
             self.save_config()
-        self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.paused = False
         self.process.write(b"resume\n")
         self.pause.setText("&Pause")
         self.pause.setEnabled(True)
-        self.work_status = "Indexing profile — 0 total results"
+        self.work_status = "Indexing profile — 0 results"
         self.show_work_status()
 
     def stop_download(self):
         self.stopping = True
         self.status_timer.stop()
         self.download.setEnabled(False)
-        self.save_session_button.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
@@ -588,26 +699,16 @@ class MainWindow(QMainWindow):
 
     def cancel_started_process(self):
         if self.stopping:
-            subprocess.run(["taskkill", "/PID", str(self.process.processId()), "/T", "/F"],
-                           check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            if self.scanning:
+                self.process.write(b"stop\n")
+            else:
+                subprocess.run(["taskkill", "/PID", str(self.process.processId()), "/T", "/F"],
+                               check=True, capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def reset_session(self):
-        self.status_timer.stop()
-        self.clear_scan()
-        self.download_progress = None
-        self.paused = self.stopping = self.completed = self.scanning = False
-        self.stderr_decoder.reset()
-        self.set_busy(False)
-        self.reset_session_button.setEnabled(True)
-        self.start_indexing.setEnabled(False)
-        self.pause.setText("&Pause")
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
-        self.progress.resetFormat()
-        self.log.clear()
-        self.work_status = "Ready"
-        self.statusBar().showMessage(self.work_status)
-        self.download.setFocus()
+        self.preferences.session_path.unlink()
+        self.reset_session_button.setEnabled(False)
+        self.statusBar().showMessage("Saved browser session cleared.")
 
     def process_error(self, _):
         if not self.stopping:
@@ -627,22 +728,17 @@ class MainWindow(QMainWindow):
                 self.log.appendPlainText(event["message"])
             if event["type"] == "manual":
                 self.paused = True
-                self.save_session_button.setEnabled(True)
                 self.pause.setEnabled(False)
                 self.start_indexing.setEnabled(True)
                 self.statusBar().showMessage("Waiting for you to click Scan Profile")
             elif event["type"] == "session_saved":
-                self.save_session_button.setEnabled(not self.stopping)
-                self.start_indexing.setEnabled(not self.stopping)
                 self.log.appendPlainText(f"Browser session saved: {event['path']}")
-                self.statusBar().showMessage("Browser session saved. Click Scan Profile when ready.")
+                self.statusBar().showMessage("Browser session saved.")
             elif event["type"] == "scanned":
                 self.scanned_links = event["links"]
                 self.refresh_profile_scans()
             elif event["type"] == "indexing":
-                self.work_status = (f"Indexed {event['total']} unique posts | {event['added']} new posts found"
-                                    f" | Scan {event['scan_ms']:.0f} ms | Delay {event['delay_ms']:.0f} ms"
-                                    f" | Total {event['round_ms']:.0f} ms")
+                self.work_status = f"Indexed {event['total']} unique posts, {event['added']} new posts found"
                 self.log.appendPlainText(self.work_status)
                 self.show_work_status()
             elif event["type"] == "downloading":
@@ -678,7 +774,6 @@ class MainWindow(QMainWindow):
         self.read_errors()
         self.status_timer.stop()
         self.set_busy(False)
-        self.start_indexing.setEnabled(False)
         if self.stopping:
             self.paused = False
             self.pause.setText("&Pause")
@@ -693,7 +788,7 @@ class MainWindow(QMainWindow):
                 if self.auto_download.isChecked():
                     self.start_job(self.scanned_job, self.scanned_links)
                     return
-                self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} total results. Click Download Profile.")
+                self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} results. Click Download Profile.")
             else:
                 self.statusBar().showMessage("Completed")
             if self.settings.notifications and not self.stopping:

@@ -21,34 +21,38 @@ def test_profile_list_default_path(window, tmp_path):
     window.destination.setText(str(tmp_path))
     assert window.profile_list.text() == str(tmp_path / "ttdl2.txt")
     assert window.profile_list.geometry().bottom() < window.load_profile_list_button.geometry().top()
-    assert window.load_profile_list_button.geometry().bottom() < window.source.geometry().top()
+    assert window.load_profile_list_button.mapToGlobal(window.load_profile_list_button.rect().bottomLeft()).y() < window.source.mapToGlobal(window.source.rect().topLeft()).y()
 
 
-def test_save_session_and_restore_after_restart(window, qtbot, job_factory, tmp_path, monkeypatch):
-    assert not window.save_session_button.isEnabled()
-    assert not window.restore_session_button.isEnabled()
+def test_session_saved_on_scan_and_loaded_after_restart(window, qtbot, job_factory, tmp_path, monkeypatch):
+    assert not window.reset_session_button.isEnabled()
+    assert window.session_path.text() == str(window.preferences.session_path)
+    assert window.session_path.isReadOnly()
+    window.auto_download.setChecked(False)
     window.start_job(job_factory(manual_start=True))
-    qtbot.waitUntil(lambda: window.save_session_button.isEnabled(), timeout=30000)
-    qtbot.mouseClick(window.save_session_button, Qt.MouseButton.LeftButton)
-    assert not window.start_indexing.isEnabled()
-    qtbot.waitUntil(lambda: window.save_session_button.isEnabled(), timeout=10000)
+    qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
+    qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     path = tmp_path / "browser-session.json"
     assert "cookies" in json.loads(path.read_text())
-    assert window.start_indexing.isEnabled()
-    assert not window.restore_session_button.isEnabled()
-    qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
-    assert window.restore_session_button.isEnabled()
+    assert window.reset_session_button.isEnabled()
     reopened = MainWindow(tmp_path)
     qtbot.addWidget(reopened)
     reopened.show()
-    assert reopened.restore_session_button.isEnabled()
+    assert reopened.reset_session_button.isEnabled()
     jobs = []
     monkeypatch.setattr(reopened, "start_job", lambda job: jobs.append(job))
-    qtbot.mouseClick(reopened.restore_session_button, Qt.MouseButton.LeftButton)
-    assert jobs[-1].restore_session
+    qtbot.mouseClick(reopened.start_indexing, Qt.MouseButton.LeftButton)
+    assert not jobs[-1].new_session
+    assert not jobs[-1].manual_start
     qtbot.mouseClick(reopened.download, Qt.MouseButton.LeftButton)
-    assert not jobs[-1].restore_session
+    assert jobs[-1].new_session
+    assert jobs[-1].manual_start
+    qtbot.mouseClick(reopened.reset_session_button, Qt.MouseButton.LeftButton)
+    assert not path.exists()
+    assert not reopened.reset_session_button.isEnabled()
+    qtbot.mouseClick(reopened.download, Qt.MouseButton.LeftButton)
+    assert jobs[-1].new_session
 
 
 @pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
@@ -78,7 +82,7 @@ def test_profile_list_navigation(window, qtbot, tmp_path, count):
     assert window.source.text() == "@manual"
     assert window.profile_usernames.currentIndex() == 0
     assert window.profile_usernames.currentData() is None
-    assert window.profile_usernames.currentText() == "- select profile -"
+    assert window.profile_usernames.currentText() == ""
     assert not window.prev_profile_button.isEnabled()
     assert window.next_profile_button.isEnabled() == (count > 0)
     qtbot.mouseClick(window.prev_profile_button, Qt.MouseButton.LeftButton)
@@ -120,7 +124,7 @@ def test_profile_list_reload_and_busy_state(window, qtbot, tmp_path):
     assert window.source.text() == "https://www.tiktok.com/@bob"
     assert window.profile_usernames.count() == 2
     assert window.profile_usernames.currentData() is None
-    assert window.profile_usernames.currentText() == "- select profile -"
+    assert window.profile_usernames.currentText() == ""
     assert window.next_profile_button.isEnabled()
     assert not window.prev_profile_button.isEnabled()
 
@@ -130,7 +134,7 @@ def test_profile_list_username_selection_is_one_way(window, qtbot, tmp_path):
     path.write_text("https://www.tiktok.com/@alice\n@bob\ncarol\n", encoding="utf-8")
     window.profile_list.setText(str(path))
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
-    assert [window.profile_usernames.itemText(i) for i in range(4)] == ["- select profile -", "alice", "bob", "carol"]
+    assert [window.profile_usernames.itemText(i) for i in range(4)] == ["", "alice", "bob", "carol"]
     assert window.load_profile_list_button.geometry().bottom() < window.profile_usernames.geometry().top()
     assert window.profile_usernames.geometry().bottom() < window.source.geometry().top()
     assert window.prev_profile_button.geometry().top() == window.profile_usernames.geometry().top()
@@ -156,14 +160,14 @@ def test_profile_list_filter_is_explicit_and_matches_usernames(window, qtbot, tm
     window.profile_list.setText(str(path))
     window.source.setText("@manual")
     qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
-    assert window.profile_filter.placeholderText() == "filter"
+    assert window.profile_filter.placeholderText() == "Enter text to filter usernames"
     assert window.profile_usernames.geometry().bottom() < window.profile_filter.geometry().top()
     assert window.profile_filter.geometry().bottom() < window.source.geometry().top()
     assert window.profile_filter.geometry().top() == window.filter_profiles_button.geometry().top()
     qtbot.keyClicks(window.profile_filter, "LIcE")
     assert window.profile_usernames.count() == 4
     qtbot.mouseClick(window.filter_profiles_button, Qt.MouseButton.LeftButton)
-    assert [window.profile_usernames.itemText(i) for i in range(3)] == ["- select profile -", "Alice", "malice2"]
+    assert [window.profile_usernames.itemText(i) for i in range(3)] == ["", "Alice", "malice2"]
     assert window.profile_usernames.currentData() is None
     assert window.source.text() == "@manual"
     qtbot.mouseClick(window.next_profile_button, Qt.MouseButton.LeftButton)
@@ -188,24 +192,24 @@ def test_profile_list_filter_is_explicit_and_matches_usernames(window, qtbot, tm
 
 def test_hd_mass_only_screen(window, qtbot):
     assert window.download_tab.findChildren(QComboBox) == [window.profile_usernames, window.profile_scans]
-    assert window.source.geometry().bottom() < window.profile_scans.geometry().top()
+    assert window.source.mapTo(window, window.source.rect().bottomLeft()).y() < window.profile_scans.mapTo(window, window.profile_scans.rect().topLeft()).y()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
-    assert window.download_tab.findChildren(QCheckBox) == [*window.checks.values(), window.auto_download]
-    assert window.settings_tab.findChildren(QCheckBox) == [window.remember_settings]
+    assert window.download_tab.findChildren(QCheckBox) == [window.checks["images_only"], window.checks["notifications"], window.auto_download]
+    assert window.settings_tab.findChildren(QCheckBox) == [window.checks["json_logs"], window.checks["download_logs"], window.remember_settings]
     assert window.auto_download.isChecked()
-    assert window.auto_download.geometry().bottom() < window.progress.geometry().top()
-    assert window.auto_download.geometry().top() > window.download.geometry().bottom()
+    assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.progress.mapTo(window, window.progress.rect().topLeft()).y()
+    assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.download.mapTo(window, window.download.rect().topLeft()).y()
     assert "Download activity" not in [label.text() for label in window.findChildren(QLabel)]
-    assert window.download.text() == "Create &Session"
+    assert window.download.text() == "&New Session"
     assert window.start_indexing.isVisible()
     assert window.start_indexing.text() == "&Scan Profile"
-    assert window.reset_session_button.text() == "&Reset session"
-    assert window.reset_session_button.isEnabled()
+    assert window.reset_session_button.text() == "&Clear Session"
+    assert not window.reset_session_button.isEnabled()
     assert window.reset_session_button.geometry().top() == window.download.geometry().top()
     assert window.download_videos.text() == "&Download Profile"
     assert not window.download_videos.isEnabled()
-    assert not window.start_indexing.isEnabled()
+    assert window.start_indexing.isEnabled()
     qtbot.keyClicks(window.source, "@alice")
     assert window.source.text() == "@alice"
 
@@ -254,7 +258,15 @@ def test_native_defaults(window, qtbot):
     assert window.styleSheet() == ""
     window.resize(650, 480)
     qtbot.wait(30)
-    assert window.centralWidget().rect().contains(window.log.geometry())
+    assert window.height() == 480
+    for tab, bottom_control in ((window.download_tab, window.copy_logs_button),
+                                (window.settings_tab, window.save_settings_button)):
+        window.tabs.setCurrentWidget(tab)
+        qtbot.wait(30)
+        assert tab.verticalScrollBar().maximum() > 0
+        tab.ensureWidgetVisible(bottom_control)
+        assert tab.viewport().rect().contains(bottom_control.mapTo(tab.viewport(), bottom_control.rect().center()))
+    window.tabs.setCurrentWidget(window.download_tab)
     window.source.setFocus()
     assert window.source.hasFocus()
 
@@ -281,8 +293,8 @@ def test_open_browser_click_uses_hd_mass_job(window, qtbot, monkeypatch, tmp_pat
 def test_indexing_events_without_page(window, monkeypatch):
     events = QBuffer()
     events.setData(
-        b'{"type":"indexing","total":1,"added":1,"scan_ms":12,"delay_ms":0,"round_ms":12}\n'
-        b'{"type":"indexing","total":1,"added":0,"scan_ms":8,"delay_ms":150,"round_ms":163}\n'
+        b'{"type":"indexing","total":1,"added":1}\n'
+        b'{"type":"indexing","total":1,"added":0}\n'
         b'{"type":"scanned","links":["https://www.tiktok.com/@alice/video/123"]}\n'
         b'{"type":"done","stopped":false}\n'
     )
@@ -293,8 +305,8 @@ def test_indexing_events_without_page(window, monkeypatch):
     window.read_events()
 
     assert window.log.toPlainText().splitlines() == [
-        "Indexed 1 unique posts | 1 new posts found | Scan 12 ms | Delay 0 ms | Total 12 ms",
-        "Indexed 1 unique posts | 0 new posts found | Scan 8 ms | Delay 150 ms | Total 163 ms",
+        "Indexed 1 unique posts, 1 new posts found",
+        "Indexed 1 unique posts, 0 new posts found",
     ]
     assert window.statusBar().currentMessage() == window.log.toPlainText().splitlines()[-1]
     assert window.scanned_links == ["https://www.tiktok.com/@alice/video/123"]
@@ -318,7 +330,7 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     if not automatic:
-        assert window.statusBar().currentMessage() == "Scan complete — 2 total results. Click Download Profile."
+        assert window.statusBar().currentMessage() == "Scan complete — 2 results. Click Download Profile."
         assert window.download_videos.isEnabled()
         qtbot.wait(500)
         assert server[1]["/api/hd"] == 0
@@ -339,9 +351,9 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     assert server[1]["/api/hd"] == 2
     assert (Path(job.folder) / "alice" / "video" / "123_HD.mp4").exists()
     assert window.download.isEnabled()
-    assert not window.start_indexing.isEnabled()
-    assert any(message.startswith("Indexed 1 unique posts | 1 new posts found | Scan ") for message in statuses)
-    assert any(message.startswith("Indexed 2 unique posts | 1 new posts found | Scan ") for message in statuses)
+    assert window.start_indexing.isEnabled()
+    assert any(message.startswith("Indexed 1 unique posts, 1 new posts found") for message in statuses)
+    assert any(message.startswith("Indexed 2 unique posts, 1 new posts found") for message in statuses)
     assert "Downloading (1/2) — 0 bytes downloaded — 0.00 MB/s — ETA calculating…" in statuses
     assert any(message.startswith("Downloading (2/2) — ") and "MB/s — ETA" in message for message in statuses)
     assert not window.status_timer.isActive()
@@ -402,12 +414,12 @@ def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server,
     assert not window.status_timer.isActive()
     assert window.scanning
     assert not window.paused
-    assert not window.start_indexing.isEnabled()
+    assert window.start_indexing.isEnabled()
     assert not window.download_videos.isEnabled()
     assert not window.pause.isEnabled()
     assert not window.stop.isEnabled()
     assert window.download.isEnabled()
-    assert window.reset_session_button.isEnabled()
+    assert window.reset_session_button.isEnabled() == window.preferences.session_path.is_file()
     assert window.log.toPlainText() == retained_log
     assert existing.read_text() == "previously collected URLs"
     assert server[1]["/api/hd"] == 0
@@ -420,7 +432,7 @@ def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server,
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
 
 
-def test_reset_idle_clears_restored_scan_without_changing_inputs(window, qtbot, tmp_path, monkeypatch):
+def test_clear_session_deletes_browser_state_without_changing_scan(window, qtbot, tmp_path, monkeypatch):
     window.source.setText("@alice")
     window.destination.setText(str(tmp_path))
     window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
@@ -429,19 +441,21 @@ def test_reset_idle_clears_restored_scan_without_changing_inputs(window, qtbot, 
     window.progress.setRange(0, 5)
     window.progress.setValue(3)
     window.preferences.session_path.write_text('{"cookies": []}')
-    saved_session = window.preferences.session_path.read_bytes()
+    window.set_busy(False)
     cancellations = []
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: cancellations.append(args))
     qtbot.mouseClick(window.reset_session_button, Qt.MouseButton.LeftButton)
     assert window.source.text() == "@alice"
     assert window.destination.text() == str(tmp_path)
     assert cancellations == []
-    assert window.preferences.session_path.read_bytes() == saved_session
-    assert window.log.toPlainText() == ""
-    assert window.progress.value() == 0
-    assert window.scanned_links is None
-    assert not window.download_videos.isEnabled()
-    assert window.statusBar().currentMessage() == "Ready"
+    assert not window.preferences.session_path.exists()
+    assert not window.reset_session_button.isEnabled()
+    assert window.process.state() == QProcess.ProcessState.NotRunning
+    assert window.log.toPlainText() == "Previous activity"
+    assert window.progress.value() == 3
+    assert window.scanned_links == ["https://www.tiktok.com/@alice/video/123"]
+    assert window.download_videos.isEnabled()
+    assert window.statusBar().currentMessage() == "Saved browser session cleared."
 
 
 def test_stop_discards_queued_scan_completion(window, monkeypatch):
@@ -564,7 +578,7 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, aut
     assert window.scanned_job.source == "https://www.tiktok.com/@alice"
     assert window.scanned_job.folder == str(folder)
     assert window.download_videos.isEnabled()
-    assert window.statusBar().currentMessage() == "Scan restored — 2 total results."
+    assert window.statusBar().currentMessage() == "Scan restored — 2 results."
     assert window.process.state() == QProcess.ProcessState.NotRunning
     assert sum(server[1].values()) == 0
     window.scanned_job.hd_api = server[0] + "/api/hd"
@@ -578,6 +592,39 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, aut
     assert (folder / "alice" / "video" / "123_HD.mp4").exists()
     assert server[1]["/@alice"] == 0
     assert server[1]["/api/hd"] == 2
+
+
+def test_new_profile_scan_placeholder_and_refresh(window, qtbot, tmp_path, monkeypatch):
+    path = tmp_path / "profiles.txt"
+    path.write_text("@alice\n@bob\n")
+    window.profile_list.setText(str(path))
+    window.load_profile_list()
+    window.profile_usernames.setCurrentIndex(1)
+    assert window.profile_scans.currentText() == "alice*"
+    assert not window.profile_scans.model().item(window.profile_scans.currentIndex()).isEnabled()
+    assert not window.restore_scan_button.isEnabled()
+    window.profile_usernames.setCurrentIndex(2)
+    assert window.profile_scans.currentText() == "bob*"
+    assert window.profile_scans.findText("alice*") == -1
+    (window.preferences.scan_dir / "alice_combined_links.txt").write_text("post")
+    qtbot.mouseClick(window.refresh_scans_button, Qt.MouseButton.LeftButton)
+    assert window.profile_scans.findText("alice") >= 0
+    assert window.profile_scans.currentText() == "bob*"
+    window.profile_scans.setCurrentText("alice")
+    assert window.restore_scan_button.isEnabled()
+    window.profile_usernames.setCurrentIndex(1)
+    window.profile_usernames.setCurrentIndex(2)
+    (window.preferences.scan_dir / "bob_combined_links.txt").write_text("post")
+    events = QBuffer()
+    events.setData(b'{"type":"scanned","links":["post"]}\n')
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
+    monkeypatch.setattr(window.process, "readLine", events.readLine)
+    window.read_events()
+    assert window.profile_scans.currentText() == "bob"
+    assert window.profile_scans.findText("bob*") == -1
+    assert window.restore_scan_button.isEnabled()
+    assert window.refresh_scans_button.geometry().top() == window.sync_scans_button.geometry().top()
 
 
 def test_restore_missing_scan_disables_download(window, qtbot, tmp_path):

@@ -29,6 +29,32 @@ def test_invalid_config_surfaces(tmp_path):
         Settings(tmp_path)
 
 
+def test_startup_loads_profiles_and_restores_selected_username(qtbot, tmp_path, monkeypatch):
+    folder = tmp_path / "downloads"
+    folder.mkdir()
+    profiles = folder / "ttdl2.txt"
+    profiles.write_text("@alice\nhttps://www.tiktok.com/@bob\n@carol\n", encoding="utf-8")
+    AppState(folder=str(folder)).save(tmp_path / "state.json")
+    window = MainWindow(tmp_path)
+    qtbot.addWidget(window)
+    assert [window.profile_usernames.itemText(i) for i in range(4)] == ["", "alice", "bob", "carol"]
+    window.profile_usernames.setCurrentIndex(2)
+    window.close()
+    assert json.loads((tmp_path / "state.json").read_text())["selected_username"] == "bob"
+
+    profiles.write_text("@carol\n@alice\n@bob\n", encoding="utf-8")
+    restored = MainWindow(tmp_path)
+    qtbot.addWidget(restored)
+    assert restored.profile_usernames.currentText() == "bob"
+    assert restored.profile_usernames.currentIndex() == 3
+    assert restored.source.text() == "@bob"
+    jobs = []
+    monkeypatch.setattr(restored, "start_job", jobs.append)
+    restored.start_download()
+    assert jobs[0].source == "@bob"
+    restored.close()
+
+
 def test_save_restart_reset_and_close(qtbot, tmp_path):
     window = MainWindow(tmp_path)
     qtbot.addWidget(window)
@@ -182,5 +208,5 @@ def test_browser_install_process_refreshes_status(qtbot, tmp_path, monkeypatch, 
     qtbot.waitUntil(lambda: window.check_browser_button.isEnabled(), timeout=10000)
     assert window.browser_status.text() == "Browser installed"
     assert window.download.isEnabled()
-    assert window.reset_session_button.isEnabled()
+    assert not window.reset_session_button.isEnabled()
     assert window.statusBar().currentMessage() == "Browser installer exited with code 0"

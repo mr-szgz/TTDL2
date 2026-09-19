@@ -24,8 +24,8 @@ class Job:
     scroll_ms: int = 10000
     site: str = "https://www.tiktok.com"
     hd_api: str = "https://www.tikwm.com/api/"
-    session_path: str = ""
-    restore_session: bool = False
+    session_path: str = str(CONFIG_DIR / "browser-session.json")
+    new_session: bool = False
     scan_dir: str = str(CONFIG_DIR / "scans")
 
 class Control:
@@ -33,7 +33,6 @@ class Control:
         self.ready = threading.Event()
         self.ready.set()
         self.stopped = threading.Event()
-        self.save_session = threading.Event()
 
     def pause(self):
         self.ready.clear()
@@ -88,6 +87,7 @@ class Downloader:
         """MassDownloadByUsername: browser, manual Resume, scroll, saved links."""
         job = self.job
         username = profile_name(job.source)
+        self.log(f"Scan delay: {job.scroll_ms / 1000:g} sec")
         with sync_playwright() as playwright:
             options = {"headless": job.headless}
             executable = job.executable
@@ -99,18 +99,19 @@ class Downloader:
             elif job.browser in ("chrome", "msedge"):
                 options["channel"] = job.browser
             browser = engine.launch(**options)
-            context = browser.new_context(storage_state=job.session_path if job.restore_session else None)
+            context = browser.new_context(storage_state=job.session_path
+                                          if not job.new_session and Path(job.session_path).is_file() else None)
             page = context.new_page()
             page.goto(f"{job.site}/@{quote(username)}", wait_until="domcontentloaded", timeout=120000)
+            context.storage_state(path=job.session_path, indexed_db=True)
+            self.emit({"type": "session_saved", "path": job.session_path})
             if job.manual_start:
                 self.control.pause()
                 self.emit({"type": "manual", "message": "Set up the browser session: log in, solve CAPTCHA, and open the profile. Click Scan Profile in the app when ready."})
                 while not self.control.ready.is_set() and not self.control.stopped.is_set():
-                    if self.control.save_session.is_set():
-                        self.control.save_session.clear()
-                        context.storage_state(path=job.session_path, indexed_db=True)
-                        self.emit({"type": "session_saved", "path": job.session_path})
-                    page.wait_for_timeout(100)
+                    page.wait_for_timeout(1000)
+                    context.storage_state(path=job.session_path, indexed_db=True)
+                context.storage_state(path=job.session_path, indexed_db=True)
             if self.control.checkpoint() and not job.headless:
                 session = context.new_cdp_session(page)
                 window_id = session.send("Browser.getWindowForTarget")["windowId"]
@@ -118,14 +119,11 @@ class Downloader:
                     "windowId": window_id, "bounds": {"windowState": "minimized"},
                 })
                 session.detach()
-                self.log("Browser minimized. Indexing in the background — 0 total results indexed.")
+                self.log("Browser minimized. Indexing in the background — 0 results indexed.")
             indexed = {"video": [], "photo": []}
             total = 0
             last_page = False
-            delay_ms = 0.0
-            scroll_elapsed_ms = 0.0
             while self.control.checkpoint():
-                scan_started = monotonic()
                 previous_total = total
                 for kind in ("video", "photo"):
                     for link in page.locator(f'a[href*="/{kind}/"]').evaluate_all("nodes => nodes.map(n => n.href)"):
@@ -135,21 +133,18 @@ class Downloader:
                             if canonical not in indexed[kind]:
                                 indexed[kind].append(canonical)
                 total = len(indexed["video"]) + len(indexed["photo"])
-                scan_ms = (monotonic() - scan_started) * 1000
-                self.emit({"type": "indexing", "total": total, "added": total - previous_total,
-                           "scan_ms": scan_ms, "delay_ms": delay_ms,
-                           "round_ms": scroll_elapsed_ms + scan_ms})
+                self.emit({"type": "indexing", "total": total, "added": total - previous_total})
                 if last_page:
                     break
-                scroll_started = monotonic()
                 height = page.evaluate("document.body.scrollHeight")
                 page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                delay_started = monotonic()
-                page.wait_for_timeout(job.scroll_ms)
-                delay_ms = (monotonic() - delay_started) * 1000
+                scroll_deadline = monotonic() + job.scroll_ms / 1000
+                while not self.control.stopped.is_set() and monotonic() < scroll_deadline:
+                    page.wait_for_timeout(min(100, (scroll_deadline - monotonic()) * 1000))
                 last_page = height == page.evaluate("document.body.scrollHeight")
-                scroll_elapsed_ms = (monotonic() - scroll_started) * 1000
+                context.storage_state(path=job.session_path, indexed_db=True)
             links = indexed["video"] + indexed["photo"]
+            context.storage_state(path=job.session_path, indexed_db=True)
             context.close()
             browser.close()
             if self.control.stopped.is_set():
@@ -157,7 +152,7 @@ class Downloader:
             Path(job.scan_dir).mkdir(parents=True, exist_ok=True)
             path = Path(job.scan_dir) / f"{filename_component(username)}_combined_links.txt"
             path.write_text("\n".join(links), encoding="utf-8")
-            self.log(f"Indexing complete — {len(links)} total results. Saved URLs to {path}")
+            self.log(f"Indexing complete — {len(links)} results. Saved URLs to {path}")
         return read_links(path)
 
     def media(self, url, session):

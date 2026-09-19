@@ -12,6 +12,7 @@ CONFIG_DIR = dirs.user_config_path
 
 class AppState(BaseModel):
     source: str = ""
+    selected_username: str = ""
     folder: str = Field(default_factory=lambda: str(user_desktop_path() / "TikTokDownloads2"))
     window_geometry: str = ""
 
@@ -25,6 +26,7 @@ class AppConfig(AppState):
     json_logs: bool = False
     download_logs: bool = False
     notifications: bool = False
+    scroll_ms: int = 10000
     browser: Literal["system", "chromium", "chrome", "msedge", "firefox"] = "chromium"
     executable: str = ""
 
