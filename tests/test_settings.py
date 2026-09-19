@@ -120,7 +120,7 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     window = MainWindow(tmp_path)
     qtbot.addWidget(window)
     window.show()
-    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Download", "Settings"]
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Downloader", "Settings"]
     assert window.tabs.currentWidget() == window.download_tab
     assert not window.findChildren(QDialog)
     assert not window.findChildren(QMenuBar)
