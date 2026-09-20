@@ -7,12 +7,13 @@ import re
 import subprocess
 import sys
 
-from PySide6.QtCore import QByteArray, QProcess, QSize, QTimer, QUrl
+from PySide6.QtCore import QByteArray, QProcess, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMainWindow,
-    QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QTabWidget, QToolButton, QVBoxLayout, QWidget,
+    QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel,
+    QLineEdit, QMainWindow, QPlainTextEdit, QProgressBar, QPushButton, QScrollArea, QSizePolicy,
+    QTabWidget, QToolButton, QVBoxLayout, QWidget,
 )
 from playwright.sync_api import sync_playwright
 
@@ -20,6 +21,160 @@ from .core import Job, filename_component, profile_name, read_links, system_brow
 from . import __version__
 from .progress import DownloadProgress
 from .settings import AppState, CONFIG_DIR, Settings
+
+
+class ProfileListDialog(QDialog):
+    profiles_saved = Signal(list)
+    profile_selected = Signal(str)
+
+    def __init__(self, profiles, parent=None):
+        super().__init__(parent)
+        self.profiles = list(profiles)
+        self.profile_rows = []
+        self.setObjectName("profileListDialog")
+        self.setWindowTitle("Manage Profile List")
+        self.resize(720, 480)
+        self.setMinimumSize(500, 350)
+
+        layout = QVBoxLayout(self)
+        add_row = QHBoxLayout()
+        add_label = QLabel("&URL or username")
+        self.add_input = QLineEdit()
+        self.add_input.setObjectName("profileToAdd")
+        self.add_input.setAccessibleName("TikTok profile URL or username to add")
+        self.add_input.setPlaceholderText("@username or TikTok profile URL")
+        add_label.setBuddy(self.add_input)
+        add_row.addWidget(add_label)
+        add_row.addWidget(self.add_input, 1)
+        self.add_profile_button = QPushButton("&Add Profile")
+        self.add_profile_button.setObjectName("addProfile")
+        self.add_profile_button.setEnabled(False)
+        self.add_profile_button.clicked.connect(self.add_profile)
+        self.add_input.textChanged.connect(self.update_add_button)
+        self.add_input.returnPressed.connect(self.add_profile_button.click)
+        add_row.addWidget(self.add_profile_button)
+        layout.addLayout(add_row)
+
+        list_actions = QHBoxLayout()
+        self.sort_button = QPushButton("&Sort")
+        self.sort_button.setObjectName("sortProfiles")
+        self.sort_button.clicked.connect(self.sort_profiles)
+        list_actions.addWidget(self.sort_button)
+        self.deduplicate_button = QPushButton("&Deduplicate")
+        self.deduplicate_button.setObjectName("deduplicateProfiles")
+        self.deduplicate_button.clicked.connect(self.deduplicate_profiles)
+        list_actions.addWidget(self.deduplicate_button)
+        list_actions.addStretch()
+        layout.addLayout(list_actions)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Profile URL"), 1)
+        header.addWidget(QLabel("Actions"))
+        layout.addLayout(header)
+        self.profile_scroll = QScrollArea()
+        self.profile_scroll.setObjectName("managedProfiles")
+        self.profile_scroll.setWidgetResizable(True)
+        self.profile_scroll.setAccessibleName("Profiles")
+        self.profile_content = QWidget()
+        self.profile_layout = QVBoxLayout(self.profile_content)
+        self.profile_layout.setContentsMargins(0, 0, 0, 0)
+        self.profile_layout.setSpacing(6)
+        self.profile_scroll.setWidget(self.profile_content)
+        layout.addWidget(self.profile_scroll, 1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        self.save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        self.save_button.setText("&Save List")
+        self.save_button.setObjectName("saveProfileList")
+        buttons.accepted.connect(self.save_profiles)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.refresh_rows()
+        self.add_input.setFocus()
+
+    def update_add_button(self, text):
+        source = text.strip()
+        username = profile_name(source)
+        host = QUrl(source).host().casefold() if "://" in source else ""
+        valid_host = "://" not in source or host in {"tiktok.com", "www.tiktok.com", "m.tiktok.com"}
+        self.add_profile_button.setEnabled(
+            valid_host and re.fullmatch(r"[A-Za-z0-9._]+", username) is not None)
+
+    def add_profile(self):
+        username = profile_name(self.add_input.text().strip())
+        self.profiles.append(f"https://www.tiktok.com/@{username}")
+        self.add_input.clear()
+        self.refresh_rows()
+
+    def sort_profiles(self):
+        self.profiles.sort(key=lambda profile: [
+            int(part) if index % 2 else part.casefold()
+            for index, part in enumerate(re.split(r"([0-9]+)", profile_name(profile)))
+        ])
+        self.refresh_rows()
+
+    def deduplicate_profiles(self):
+        usernames = set()
+        profiles = []
+        for profile in self.profiles:
+            username = profile_name(profile).casefold()
+            if username not in usernames:
+                profiles.append(profile)
+                usernames.add(username)
+        self.profiles = profiles
+        self.refresh_rows()
+
+    def remove_profile(self, index):
+        self.profiles.pop(index)
+        self.refresh_rows()
+
+    def select_profile(self, index):
+        self.profile_selected.emit(self.profiles[index])
+        self.accept()
+
+    def save_profiles(self):
+        self.profiles_saved.emit(self.profiles)
+        self.accept()
+
+    def refresh_rows(self):
+        while self.profile_layout.count():
+            item = self.profile_layout.takeAt(0)
+            if item.widget() is not None:
+                item.widget().deleteLater()
+        self.profile_rows = []
+        if not self.profiles:
+            empty = QLabel("No profiles in this list.")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.profile_layout.addWidget(empty)
+        for index, profile in enumerate(self.profiles):
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            profile_label = QLabel(profile)
+            profile_label.setAccessibleName(f"Profile {profile}")
+            profile_label.setToolTip(profile)
+            profile_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            profile_label.setMinimumWidth(0)
+            profile_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            row_layout.addWidget(profile_label, 1)
+            remove_button = QPushButton("Remove")
+            remove_button.setObjectName("removeProfile")
+            remove_button.setAccessibleName(f"Remove {profile}")
+            remove_button.clicked.connect(lambda checked=False, row_index=index: self.remove_profile(row_index))
+            row_layout.addWidget(remove_button)
+            select_button = QPushButton("Select")
+            select_button.setObjectName("selectProfile")
+            select_button.setAccessibleName(f"Select {profile}")
+            select_button.clicked.connect(lambda checked=False, row_index=index: self.select_profile(row_index))
+            row_layout.addWidget(select_button)
+            row.profile = profile
+            row.remove_button = remove_button
+            row.select_button = select_button
+            self.profile_layout.addWidget(row)
+            self.profile_rows.append(row)
+        self.profile_layout.addStretch()
 
 
 class MainWindow(QMainWindow):
@@ -118,8 +273,9 @@ class MainWindow(QMainWindow):
         profile_actions = QHBoxLayout()
         self.load_profile_list_button = QPushButton("&Load List File")
         self.load_profile_list_button.clicked.connect(self.load_profile_list)
-        self.sort_file_button = QPushButton("Sort file")
-        self.sort_file_button.clicked.connect(self.sort_profile_list)
+        self.manage_profile_list_button = QPushButton("&Manage List")
+        self.manage_profile_list_button.setObjectName("manageProfileList")
+        self.manage_profile_list_button.clicked.connect(self.manage_profile_list)
         self.next_profile_button = QPushButton("&Next Profile")
         self.next_profile_button.clicked.connect(lambda: self.profile_usernames.setCurrentIndex(
             self.profile_usernames.currentIndex() + 1))
@@ -132,7 +288,7 @@ class MainWindow(QMainWindow):
         self.next_to_scan_button.setEnabled(False)
         self.prev_profile_button.setEnabled(False)
         profile_actions.addWidget(self.load_profile_list_button)
-        profile_actions.addWidget(self.sort_file_button)
+        profile_actions.addWidget(self.manage_profile_list_button)
         profile_actions.addStretch()
         profiles_form.addRow("", profile_actions)
         self.profile_usernames = QComboBox()
@@ -499,14 +655,25 @@ class MainWindow(QMainWindow):
         self.profile_usernames.blockSignals(False)
         self.select_profile(0)
 
-    def sort_profile_list(self):
+    def manage_profile_list(self):
+        self.profile_list_dialog = ProfileListDialog(self.profiles, self)
+        self.profile_list_dialog.profiles_saved.connect(self.save_profile_list)
+        self.profile_list_dialog.profile_selected.connect(self.select_managed_profile)
+        self.profile_list_dialog.finished.connect(lambda: self.manage_profile_list_button.setFocus())
+        self.profile_list_dialog.open()
+
+    def save_profile_list(self, profiles):
         path = Path(self.profile_list.text())
-        text = path.read_text(encoding="utf-8-sig")
-        lines = text.splitlines()
-        lines.sort(key=lambda line: [int(part) if index % 2 else part.casefold()
-                                    for index, part in enumerate(re.split(r"([0-9]+)", line))])
-        path.write_text("\n".join(lines) + ("\n" if text.endswith("\n") else ""), encoding="utf-8")
-        self.statusBar().showMessage("Profile list file sorted.")
+        path.write_text("\n".join(profiles) + ("\n" if profiles else ""), encoding="utf-8")
+        self.load_profile_list()
+        self.statusBar().showMessage("Profile list saved.")
+
+    def select_managed_profile(self, profile):
+        index = self.profile_usernames.findText(profile_name(profile))
+        if index >= 0:
+            self.profile_usernames.setCurrentIndex(index)
+        else:
+            self.source.setText(profile)
 
     def sync_scanned_profiles(self):
         path = Path(self.profile_list.text())

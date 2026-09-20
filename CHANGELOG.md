@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add an in-app profile-list manager for adding, selecting, removing, sorting, and deduplicating profiles before saving the list.
+
+### Changed
+
+- Replace the main-window **Sort file** action with **Manage List** and reload the profile controls after saving changes.
+
 ## [3.4.3] - 2026-09-19
 
 ### Fixed

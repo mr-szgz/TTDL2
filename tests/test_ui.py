@@ -55,20 +55,75 @@ def test_session_saved_on_scan_and_loaded_after_restart(window, qtbot, job_facto
     assert jobs[-1].new_session
 
 
-@pytest.mark.parametrize("encoding", ["utf-8", "utf-8-sig"])
-@pytest.mark.parametrize("content, expected", [
-    ("@profile10\n@Profile2\n@profile1\n@profile2\n", "@profile1\n@Profile2\n@profile2\n@profile10\n"),
-    ("@p2part10\n@p2part2\n@p1part20", "@p1part20\n@p2part2\n@p2part10"),
-    ("@p10\n\n@p2\n@p2\n", "\n@p2\n@p2\n@p10\n"),
-    ("", ""),
-])
-def test_sort_profile_list_file(window, qtbot, tmp_path, encoding, content, expected):
+def test_manage_profile_list_edits_in_memory_until_save(window, qtbot, tmp_path):
     path = tmp_path / "profiles.txt"
-    path.write_text(content, encoding=encoding)
+    original = "@profile10\nhttps://www.tiktok.com/@Profile2\n@profile2\n@remove-me\n"
+    path.write_text(original, encoding="utf-8-sig")
     window.profile_list.setText(str(path))
-    qtbot.mouseClick(window.sort_file_button, Qt.MouseButton.LeftButton)
-    assert path.read_text(encoding="utf-8") == expected
-    assert window.statusBar().currentMessage() == "Profile list file sorted."
+    qtbot.mouseClick(window.load_profile_list_button, Qt.MouseButton.LeftButton)
+
+    assert window.manage_profile_list_button.text() == "&Manage List"
+    qtbot.mouseClick(window.manage_profile_list_button, Qt.MouseButton.LeftButton)
+    dialog = window.profile_list_dialog
+    assert dialog.isVisible()
+    assert [row.profile for row in dialog.profile_rows] == [
+        "@profile10", "https://www.tiktok.com/@Profile2", "@profile2", "@remove-me"]
+
+    dialog.add_input.setText("new.profile")
+    assert dialog.add_profile_button.isEnabled()
+    qtbot.mouseClick(dialog.add_profile_button, Qt.MouseButton.LeftButton)
+    assert dialog.profiles[-1] == "https://www.tiktok.com/@new.profile"
+    qtbot.mouseClick(dialog.profile_rows[3].remove_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.sort_button, Qt.MouseButton.LeftButton)
+    qtbot.mouseClick(dialog.deduplicate_button, Qt.MouseButton.LeftButton)
+
+    assert path.read_text(encoding="utf-8-sig") == original
+    assert dialog.profiles == [
+        "https://www.tiktok.com/@new.profile",
+        "https://www.tiktok.com/@Profile2",
+        "@profile10",
+    ]
+
+    qtbot.mouseClick(dialog.save_button, Qt.MouseButton.LeftButton)
+    assert not dialog.isVisible()
+    assert path.read_text(encoding="utf-8") == (
+        "https://www.tiktok.com/@new.profile\n"
+        "https://www.tiktok.com/@Profile2\n"
+        "@profile10\n"
+    )
+    assert [window.profile_usernames.itemText(index) for index in range(4)] == [
+        "", "new.profile", "Profile2", "profile10"]
+    assert window.statusBar().currentMessage() == "Profile list saved."
+
+
+def test_manage_profile_list_select_closes_without_saving(window, qtbot, tmp_path):
+    path = tmp_path / "profiles.txt"
+    original = "@alice\n@bob\n"
+    path.write_text(original, encoding="utf-8")
+    window.profile_list.setText(str(path))
+    window.load_profile_list()
+    qtbot.mouseClick(window.manage_profile_list_button, Qt.MouseButton.LeftButton)
+    dialog = window.profile_list_dialog
+    dialog.add_input.setText("@unsaved")
+    qtbot.mouseClick(dialog.add_profile_button, Qt.MouseButton.LeftButton)
+
+    qtbot.mouseClick(dialog.profile_rows[1].select_button, Qt.MouseButton.LeftButton)
+
+    assert not dialog.isVisible()
+    assert window.profile_usernames.currentText() == "bob"
+    assert window.source.text() == "@bob"
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_manage_profile_list_accepts_only_tiktok_profiles(window, qtbot):
+    qtbot.mouseClick(window.manage_profile_list_button, Qt.MouseButton.LeftButton)
+    dialog = window.profile_list_dialog
+    dialog.add_input.setText("https://example.com/@alice")
+    assert not dialog.add_profile_button.isEnabled()
+    dialog.add_input.setText("https://www.tiktok.com/@alice/?lang=en")
+    assert dialog.add_profile_button.isEnabled()
+    qtbot.mouseClick(dialog.add_profile_button, Qt.MouseButton.LeftButton)
+    assert dialog.profiles == ["https://www.tiktok.com/@alice"]
 
 
 @pytest.mark.parametrize("count", [0, 1, 3])
