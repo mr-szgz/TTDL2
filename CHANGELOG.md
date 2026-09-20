@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.5.0] - 2026-09-20
+
 ### Added
 
 - Add a TikTok Direct download provider that reads TikTok's own post data, selects the highest-resolution no-watermark video variant, downloads photo posts, and reuses the saved browser session plus an optional cookie.
@@ -180,7 +182,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.6...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.5.0...HEAD
+[3.5.0]: https://github.com/mr-szgz/ttdl2/compare/v3.4.6...v3.5.0
 [3.4.6]: https://github.com/mr-szgz/ttdl2/compare/v3.4.5...v3.4.6
 [3.4.5]: https://github.com/mr-szgz/ttdl2/compare/v3.4.4...v3.4.5
 [3.4.4]: https://github.com/mr-szgz/ttdl2/compare/v3.4.3...v3.4.4

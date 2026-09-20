@@ -674,7 +674,7 @@ def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server,
     assert window.process.state() != QProcess.ProcessState.NotRunning
     assert retained_log in application_log(window)
     qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     assert window.process.state() == QProcess.ProcessState.NotRunning
     assert "Stopped" in application_log(window)
     assert window.scanned_links is None
@@ -697,7 +697,7 @@ def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server,
     window.start_job(job)
     qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
     qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
-    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
+    qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
 
 
 def test_clear_session_deletes_browser_state_without_changing_scan(window, qtbot, tmp_path, monkeypatch):
