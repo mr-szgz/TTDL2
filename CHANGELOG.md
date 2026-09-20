@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add an **Auto continue to next to scan** option that advances through profiles without saved scans, waiting for automatic downloads when enabled and stopping with the active operation.
+
 ## [3.4.4] - 2026-09-19
 
 ### Added

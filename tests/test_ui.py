@@ -273,10 +273,15 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.source.mapTo(window, window.source.rect().bottomLeft()).y() < window.profile_scans.mapTo(window, window.profile_scans.rect().topLeft()).y()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
-    assert window.download_tab.findChildren(QCheckBox) == [window.checks["images_only"], window.checks["notifications"],
-                                                           window.auto_download, window.remember_settings]
+    assert window.download_tab.findChildren(QCheckBox) == [window.auto_continue, window.checks["images_only"],
+                                                           window.checks["notifications"], window.auto_download,
+                                                           window.remember_settings]
     assert window.settings_tab.findChildren(QCheckBox) == [window.checks["json_logs"], window.checks["download_logs"]]
     assert window.scan_delay.parentWidget().title() == "Scan Profiles"
+    assert window.auto_continue.parentWidget().title() == "Scan Profiles"
+    assert window.auto_continue.text() == "&Auto continue to next to scan"
+    assert not window.auto_continue.isChecked()
+    assert window.scan_delay.geometry().bottom() < window.auto_continue.geometry().top()
     assert window.open_profile_downloads_button.text() == "Open profile downloads"
     assert window.auto_download.isChecked()
     assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.progress.mapTo(window, window.progress.rect().topLeft()).y()
@@ -315,6 +320,96 @@ def test_automatic_download_toggle_respects_scan_and_busy_state(window):
     assert not window.download_videos.isEnabled()
 
 
+def test_auto_continue_starts_next_unscanned_after_scan(window, tmp_path, monkeypatch):
+    path = tmp_path / "profiles.txt"
+    path.write_text("@alice\n@bob\n@carol\n")
+    (window.preferences.scan_dir / "alice_combined_links.txt").write_text("post")
+    (window.preferences.scan_dir / "carol_combined_links.txt").write_text("post")
+    window.profile_list.setText(str(path))
+    window.load_profile_list()
+    window.profile_usernames.setCurrentIndex(1)
+    window.auto_download.setChecked(False)
+    window.auto_continue.setChecked(True)
+    window.auto_continuing = True
+    window.scanning = True
+    window.completed = True
+    window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    scans = []
+    monkeypatch.setattr(window, "begin_indexing", lambda: scans.append(window.source.text()))
+
+    window.process_finished(0, QProcess.ExitStatus.NormalExit)
+
+    assert scans == ["@bob"]
+    assert window.profile_usernames.currentText() == "bob"
+
+
+def test_auto_continue_waits_for_automatic_downloads(window, tmp_path, monkeypatch):
+    path = tmp_path / "profiles.txt"
+    path.write_text("@alice\n@bob\n")
+    (window.preferences.scan_dir / "alice_combined_links.txt").write_text("post")
+    window.profile_list.setText(str(path))
+    window.load_profile_list()
+    window.profile_usernames.setCurrentIndex(1)
+    window.auto_download.setChecked(True)
+    window.auto_continue.setChecked(True)
+    window.auto_continuing = True
+    window.scanning = True
+    window.completed = True
+    window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    downloads = []
+    scans = []
+    monkeypatch.setattr(window, "start_job", lambda *args: downloads.append(args))
+    monkeypatch.setattr(window, "begin_indexing", lambda: scans.append(window.source.text()))
+
+    window.process_finished(0, QProcess.ExitStatus.NormalExit)
+
+    assert downloads == [(window.scanned_job, window.scanned_links)]
+    assert scans == []
+    assert window.profile_usernames.currentText() == "alice"
+
+    window.scanning = False
+    window.completed = True
+    window.process_finished(0, QProcess.ExitStatus.NormalExit)
+
+    assert scans == ["@bob"]
+    assert window.profile_usernames.currentText() == "bob"
+
+
+def test_auto_continue_finishes_when_all_later_profiles_are_scanned(window, tmp_path, monkeypatch):
+    path = tmp_path / "profiles.txt"
+    path.write_text("@alice\n@bob\n")
+    (window.preferences.scan_dir / "alice_combined_links.txt").write_text("post")
+    (window.preferences.scan_dir / "bob_combined_links.txt").write_text("post")
+    window.profile_list.setText(str(path))
+    window.load_profile_list()
+    window.profile_usernames.setCurrentIndex(1)
+    window.auto_download.setChecked(False)
+    window.auto_continue.setChecked(True)
+    window.auto_continuing = True
+    window.scanning = True
+    window.completed = True
+    window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
+    scans = []
+    monkeypatch.setattr(window, "begin_indexing", lambda: scans.append(window.source.text()))
+
+    window.process_finished(0, QProcess.ExitStatus.NormalExit)
+
+    assert scans == []
+    assert not window.auto_continuing
+    assert window.profile_usernames.currentText() == "alice"
+    assert window.statusBar().currentMessage() == "Scan complete — 1 results. Click Download Profile."
+
+
+def test_stop_cancels_auto_continue_routine(window):
+    window.auto_continue.setChecked(True)
+    window.auto_continuing = True
+
+    window.stop_download()
+
+    assert not window.auto_continuing
+    assert window.auto_continue.isChecked()
+
+
 @pytest.mark.parametrize("code, status, completed, stopped", [
     (1, QProcess.ExitStatus.NormalExit, True, False),
     (0, QProcess.ExitStatus.CrashExit, True, False),
@@ -323,13 +418,19 @@ def test_automatic_download_toggle_respects_scan_and_busy_state(window):
 ])
 def test_unsuccessful_scan_does_not_auto_download(window, monkeypatch, code, status, completed, stopped):
     jobs = []
+    scans = []
     monkeypatch.setattr(window, "start_job", lambda *args: jobs.append(args))
+    monkeypatch.setattr(window, "begin_indexing", lambda: scans.append(window.source.text()))
+    window.auto_continue.setChecked(True)
+    window.auto_continuing = True
     window.scanning = True
     window.completed = completed
     window.stopping = stopped
     window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
     window.process_finished(code, status)
     assert jobs == []
+    assert scans == []
+    assert not window.auto_continuing
     assert window.download_videos.isEnabled()
 
 

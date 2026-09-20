@@ -198,6 +198,7 @@ class MainWindow(QMainWindow):
         self.paused = False
         self.stopping = False
         self.completed = False
+        self.auto_continuing = False
         self.work_status = "Ready"
         self.download_progress = None
         self.scanned_links = None
@@ -368,6 +369,11 @@ class MainWindow(QMainWindow):
         scan_delay_label = QLabel("Scan &delay")
         scan_delay_label.setBuddy(self.scan_delay)
         profile_form.addRow(scan_delay_label, self.scan_delay)
+        self.auto_continue = QCheckBox("&Auto continue to next to scan")
+        self.auto_continue.setObjectName("autoContinueToNextScan")
+        self.auto_continue.setToolTip(
+            "After each scan and any automatic downloads, scan the next profile without saved results")
+        profile_form.addRow("", self.auto_continue)
         download_group = QGroupBox("Downloads")
         download_form = QFormLayout(download_group)
         form.addRow(download_group)
@@ -704,10 +710,13 @@ class MainWindow(QMainWindow):
         self.next_to_scan_button.setEnabled(index < self.profile_usernames.count() - 1)
 
     def select_next_unscanned_profile(self):
+        scanned = {path.name.removesuffix("_combined_links.txt").casefold()
+                   for path in self.preferences.scan_dir.glob("*_combined_links.txt")}
         for index in range(self.profile_usernames.currentIndex() + 1, self.profile_usernames.count()):
-            self.profile_usernames.setCurrentIndex(index)
-            if self.profile_scans.currentText().endswith("*"):
-                break
+            if profile_name(self.profile_usernames.itemData(index)).casefold() not in scanned:
+                self.profile_usernames.setCurrentIndex(index)
+                return True
+        return False
 
     def open_profile_downloads(self):
         folder = Path(self.destination.text()) / filename_component(profile_name(self.source.text()))
@@ -868,6 +877,7 @@ class MainWindow(QMainWindow):
         self.show_work_status()
 
     def begin_indexing(self):
+        self.auto_continuing = self.auto_continue.isChecked()
         if self.process.state() == QProcess.ProcessState.NotRunning:
             settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
             self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
@@ -884,6 +894,7 @@ class MainWindow(QMainWindow):
         self.show_work_status()
 
     def stop_download(self):
+        self.auto_continuing = False
         self.stopping = True
         self.status_timer.stop()
         self.download.setEnabled(False)
@@ -972,6 +983,7 @@ class MainWindow(QMainWindow):
         self.status_timer.stop()
         self.set_busy(False)
         if self.stopping:
+            self.auto_continuing = False
             self.paused = False
             self.pause.setText("&Pause")
             if self.progress.maximum() == 0:
@@ -979,17 +991,27 @@ class MainWindow(QMainWindow):
                 self.progress.setValue(0)
             self.statusBar().showMessage("Stopped")
         elif code != 0 or status == QProcess.ExitStatus.CrashExit:
+            self.auto_continuing = False
             self.statusBar().showMessage(f"Process exited with code {code}; see traceback above")
         elif self.completed:
             if self.scanning:
                 if self.auto_download.isChecked():
                     self.start_job(self.scanned_job, self.scanned_links)
                     return
+                if self.auto_continuing and self.select_next_unscanned_profile():
+                    self.begin_indexing()
+                    return
                 self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} results. Click Download Profile.")
             else:
+                if self.auto_continuing and self.select_next_unscanned_profile():
+                    self.begin_indexing()
+                    return
                 self.statusBar().showMessage("Completed")
+            self.auto_continuing = False
             if self.settings.notifications and not self.stopping:
                 QApplication.alert(self)
+        else:
+            self.auto_continuing = False
         self.download_videos.setEnabled(bool(self.scanned_links))
         if self.closing:
             self.close()
