@@ -476,7 +476,23 @@ class MainWindow(QMainWindow):
         self.progress = QProgressBar()
         self.progress.setRange(0, 1)
         self.progress.setValue(0)
-        layout.addWidget(self.progress)
+        self.progress.setTextVisible(False)
+        self.progress_status = QLabel("Idle")
+        self.progress_status.setObjectName("progressStatus")
+        self.progress_status.setAccessibleName("Download progress count")
+        self.progress_details = QLabel("0% — 0.00 items/s — ETA calculating…")
+        self.progress_details.setObjectName("progressDetails")
+        self.progress_details.setAccessibleName("Download rate and time remaining")
+        self.progress_details.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        progress_row = QHBoxLayout()
+        progress_row.addWidget(self.progress_status)
+        progress_row.addWidget(self.progress, 1)
+        progress_row.addWidget(self.progress_details)
+        layout.addLayout(progress_row)
+        self.progress_timer = QTimer(self)
+        self.progress_timer.setInterval(1000)
+        self.progress_timer.timeout.connect(self.refresh_progress_display)
+        self.progress_timer.start()
         self.log = QPlainTextEdit()
         self.log.setObjectName("activityLog")
         self.log.setAccessibleName("Application log file tail")
@@ -518,7 +534,22 @@ class MainWindow(QMainWindow):
         api_method_label.setBuddy(self.api_method)
         api_form.addRow(api_method_label, self.api_method)
         api_layout.addLayout(api_form)
+        self.tiktok_direct_group = QGroupBox("TikTok Direct")
+        self.tiktok_direct_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        tiktok_direct_form = QFormLayout(self.tiktok_direct_group)
+        self.tiktok_cookie = QLineEdit(self.settings.tiktok_cookie)
+        self.tiktok_cookie.setObjectName("tiktokCookie")
+        self.tiktok_cookie.setAccessibleName("TikTok cookie")
+        self.tiktok_cookie.setEchoMode(QLineEdit.EchoMode.Password)
+        self.tiktok_cookie.textChanged.connect(lambda value: self.update_option("tiktok_cookie", value))
+        tiktok_cookie_label = QLabel("&Cookie (optional)")
+        tiktok_cookie_label.setBuddy(self.tiktok_cookie)
+        tiktok_direct_form.addRow(tiktok_cookie_label, self.tiktok_cookie)
+        api_layout.addWidget(self.tiktok_direct_group)
         self.tikwm_api_group = QGroupBox("TikWM API")
+        self.tikwm_api_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         tikwm_api_form = QFormLayout(self.tikwm_api_group)
         self.tikwm_api_key = QLineEdit(self.settings.tikwm_api_key)
         self.tikwm_api_key.setObjectName("tikwmApiKey")
@@ -538,17 +569,6 @@ class MainWindow(QMainWindow):
         api_usage_label.setBuddy(self.api_usage)
         tikwm_api_form.addRow(api_usage_label, self.api_usage)
         api_layout.addWidget(self.tikwm_api_group)
-        self.tiktok_direct_group = QGroupBox("TikTok Direct")
-        tiktok_direct_form = QFormLayout(self.tiktok_direct_group)
-        self.tiktok_cookie = QLineEdit(self.settings.tiktok_cookie)
-        self.tiktok_cookie.setObjectName("tiktokCookie")
-        self.tiktok_cookie.setAccessibleName("TikTok cookie")
-        self.tiktok_cookie.setEchoMode(QLineEdit.EchoMode.Password)
-        self.tiktok_cookie.textChanged.connect(lambda value: self.update_option("tiktok_cookie", value))
-        tiktok_cookie_label = QLabel("&Cookie (optional)")
-        tiktok_cookie_label.setBuddy(self.tiktok_cookie)
-        tiktok_direct_form.addRow(tiktok_cookie_label, self.tiktok_cookie)
-        api_layout.addWidget(self.tiktok_direct_group)
         api_layout.addStretch()
         self.api_method.currentIndexChanged.connect(self.update_api_method)
         self.update_api_method()
@@ -890,7 +910,8 @@ class MainWindow(QMainWindow):
             self.paused = self.stopping = False
             self.progress.setRange(0, max(len(self.scanned_links), 1))
             self.progress.setValue(0)
-            self.progress.setFormat(f"{len(self.scanned_links)} scanned posts")
+            self.progress_status.setText(f"Scanned ({len(self.scanned_links)} posts)")
+            self.progress_details.clear()
             self.logger.info("Scan restored — %s results. Loaded %s", len(self.scanned_links), path)
             self.download_videos.setEnabled(bool(self.scanned_links))
         else:
@@ -914,6 +935,12 @@ class MainWindow(QMainWindow):
         operation = "Opening browser" if self.scanning else "Starting downloads"
         self.pause.setText("&Pause")
         self.progress.setRange(0, 0)
+        if self.scanning:
+            self.progress_status.setText("Scanning")
+            self.progress_details.clear()
+        else:
+            self.progress_status.setText(f"Downloading (0 / {len(links)})")
+            self.progress_details.setText("0% — 0.00 items/s — ETA calculating…")
         self.set_busy(True)
         self.pause.setEnabled(not self.scanning)
         self.logger.info(operation)
@@ -955,6 +982,16 @@ class MainWindow(QMainWindow):
         self.process.write(b"pause\n" if self.paused else b"resume\n")
         self.pause.setText("&Resume" if self.paused else "&Pause")
         self.logger.info("Paused" if self.paused else "Resumed")
+
+    def update_progress_display(self):
+        self.progress_status.setText(
+            f"Downloading ({self.download_progress.completed} / {self.download_progress.total})")
+        self.progress_details.setText(self.download_progress.summary())
+
+    def refresh_progress_display(self):
+        if (self.download_progress is not None and not self.scanning
+                and self.process.state() != QProcess.ProcessState.NotRunning):
+            self.update_progress_display()
 
     def begin_indexing(self):
         self.auto_continuing = self.auto_continue.isChecked()
@@ -1058,7 +1095,7 @@ class MainWindow(QMainWindow):
                 self.download_progress.completed = event["current"]
                 self.progress.setRange(0, max(event["total"], 1))
                 self.progress.setValue(event["current"])
-                self.progress.setFormat(f"{event['current']} / {event['total']} posts")
+                self.update_progress_display()
             elif event["type"] == "done":
                 self.completed = not event.get("failed", False)
                 self.stopping = event["stopped"]
@@ -1123,6 +1160,7 @@ class MainWindow(QMainWindow):
             else:
                 self.preferences.save_config(remember_settings=False)
             self.logger.info("Application closed")
+            self.progress_timer.stop()
             self.log_timer.stop()
             self.log_reader.close()
             self.logger.removeHandler(self.log_handler)

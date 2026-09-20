@@ -23,13 +23,12 @@ class DownloadProgress:
     def summary(self):
         now = monotonic() if self.paused_at is None else self.paused_at
         elapsed = now - self.started - self.paused_seconds
-        mb_per_second = self.downloaded_bytes / elapsed / 1_000_000 if self.downloaded_bytes else 0.0
-        transfer = f"{self.downloaded_bytes:,} bytes downloaded — {mb_per_second:.2f} MB/s"
+        percentage = round(self.completed / self.total * 100) if self.total else 0
         if self.completed == 0:
-            return f"{transfer} — ETA calculating…"
+            return f"{percentage}% — 0.00 items/s — ETA calculating…"
         rate = self.completed / elapsed
         remaining = ceil((self.total - self.completed) / rate)
         hours, remainder = divmod(remaining, 3600)
         minutes, seconds = divmod(remainder, 60)
         eta = f"{hours:02}:{minutes:02}:{seconds:02}" if hours else f"{minutes:02}:{seconds:02}"
-        return f"{transfer} — ETA {eta}"
+        return f"{percentage}% — {rate:.2f} items/s — ETA {eta}"

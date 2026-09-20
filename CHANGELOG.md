@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Route downloads through isolated TikWM and TikTok Direct providers selected by the API tab method combo box.
 - Remove the unused TikTok device ID setting; the direct provider does not require it.
 - Move both automatic scan/download options into the Downloader footer after **Remember settings**.
+- Split download progress into a leading **Downloading (x / y)** count, the progress bar, and trailing percentage, items-per-second, and ETA details.
+- Place the TikTok Direct settings above TikWM and keep both API groups sized to their contents.
 
 ### Fixed
 

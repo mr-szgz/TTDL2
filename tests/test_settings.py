@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QGroupBox, QMenuBar
+from PySide6.QtWidgets import QDialog, QGroupBox, QMenuBar, QSizePolicy
 
 from tiktok_downloader.app import MainWindow
 from tiktok_downloader.core import Job
@@ -189,6 +189,9 @@ def test_api_tab_settings_save_restart_and_reset(qtbot, tmp_path):
     window.show()
     window.tabs.setCurrentWidget(window.api_tab)
     assert window.api_method.currentData() == "tikwm"
+    assert window.tiktok_direct_group.geometry().bottom() < window.tikwm_api_group.geometry().top()
+    assert window.tiktok_direct_group.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
+    assert window.tikwm_api_group.sizePolicy().verticalPolicy() == QSizePolicy.Policy.Maximum
     assert window.tikwm_api_group.isEnabled()
     assert not window.tiktok_direct_group.isEnabled()
     assert window.tikwm_api_key.echoMode() == window.tikwm_api_key.EchoMode.Password

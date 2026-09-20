@@ -311,6 +311,37 @@ def test_hd_mass_only_screen(window, qtbot):
     qtbot.keyClicks(window.source, "@alice")
     assert window.source.text() == "@alice"
 
+
+def test_download_progress_row(window, monkeypatch):
+    from tiktok_downloader import progress
+
+    centers = [control.mapTo(window, control.rect().center())
+               for control in (window.progress_status, window.progress, window.progress_details)]
+    assert len({point.y() for point in centers}) == 1
+    assert [point.x() for point in centers] == sorted(point.x() for point in centers)
+    assert not window.progress.isTextVisible()
+
+    now = [100.0]
+    monkeypatch.setattr(progress, "monotonic", lambda: now[0])
+    events = QBuffer()
+    events.setData(b'{"type":"progress","current":0,"total":4}\n')
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
+    monkeypatch.setattr(window.process, "readLine", events.readLine)
+    window.read_events()
+    assert window.progress_status.text() == "Downloading (0 / 4)"
+    assert window.progress_details.text() == "0% — 0.00 items/s — ETA calculating…"
+
+    now[0] += 4
+    events = QBuffer()
+    events.setData(b'{"type":"progress","current":2,"total":4}\n')
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
+    monkeypatch.setattr(window.process, "readLine", events.readLine)
+    window.read_events()
+    assert window.progress_status.text() == "Downloading (2 / 4)"
+    assert window.progress_details.text() == "50% — 0.50 items/s — ETA 00:04"
+
 def test_automatic_download_toggle_respects_scan_and_busy_state(window):
     window.auto_download.setChecked(False)
     assert not window.download_videos.isEnabled()
