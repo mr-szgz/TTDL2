@@ -14,7 +14,7 @@ Desktop-chromium based application to mass download profile videos and photos.
 
 ## Install
 
-[Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.4.3/TTDL2-3.4.3-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)
+[Windows installer](https://github.com/mr-szgz/ttdl2/releases/download/v3.4.4/TTDL2-3.4.4-windows-x64-Setup.exe) or find more under [GitHub releases](https://github.com/mr-szgz/ttdl2/releases)
 
 ### Run from source:
 
