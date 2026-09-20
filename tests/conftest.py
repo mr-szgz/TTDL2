@@ -36,17 +36,19 @@ def server():
             elif parsed.path == "/api/hd":
                 assert parse_qs(parsed.query)["hd"] == ["1"]
                 assert parse_qs(parsed.query)["url"][0].isdigit()
-                self.send_json({"code": 0, "data": {
+                self.send_json({"code": 0, "msg": "success", "data": {
                     "author": {"unique_id": "alice"}, "hdplay": origin + "/media/hd.mp4",
                     "images": [origin + "/media/1.jpg", origin + "/media/2.jpg"],
                 }})
             elif parsed.path == "/api/hd-missing":
                 media_id = parse_qs(parsed.query)["url"][0]
                 media_path = "/media/missing.mp4" if media_id == "123" else "/media/hd.mp4"
-                self.send_json({"code": 0, "data": {
+                self.send_json({"code": 0, "msg": "success", "data": {
                     "author": {"unique_id": "alice"}, "hdplay": origin + media_path,
                     "images": [origin + "/media/1.jpg", origin + "/media/2.jpg"],
                 }})
+            elif parsed.path == "/api/limit":
+                self.send_json({"code": -1, "msg": "Free Api Limit: 10000 request/ 1 day."})
             elif parsed.path == "/@alice":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -91,6 +93,8 @@ def server():
         def send_json(self, data):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("X-Limit-Request-Remaining", "4321")
+            self.send_header("X-Limit-Request-Reset", "3600")
             self.end_headers()
             self.wfile.write(json.dumps(data).encode())
 

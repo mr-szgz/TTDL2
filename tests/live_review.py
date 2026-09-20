@@ -20,7 +20,7 @@ output.mkdir(exist_ok=True)
 
 def snapshot():
     (output / "live-review-status.txt").write_text(
-        window.statusBar().currentMessage() + "\n" + window.log.toPlainText(), encoding="utf-8")
+        window.log.toPlainText(), encoding="utf-8")
     window.grab().save(str(output / "live-review.png"))
 
 timer = QTimer()

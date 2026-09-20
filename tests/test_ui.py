@@ -14,6 +14,10 @@ def window(qtbot, tmp_path):
     widget.show()
     return widget
 
+
+def application_log(window):
+    return window.preferences.log_path.read_text(encoding="utf-8")
+
 def test_profile_list_default_path(window, tmp_path):
     assert window.profile_list.text() == str(Path(window.destination.text()) / "ttdl2.txt")
     assert not window.next_profile_button.isEnabled()
@@ -93,7 +97,7 @@ def test_manage_profile_list_edits_in_memory_until_save(window, qtbot, tmp_path)
     )
     assert [window.profile_usernames.itemText(index) for index in range(4)] == [
         "", "new.profile", "Profile2", "profile10"]
-    assert window.statusBar().currentMessage() == "Profile list saved."
+    assert f"Profile list saved: {path}" in application_log(window)
 
 
 def test_manage_profile_list_select_closes_without_saving(window, qtbot, tmp_path):
@@ -270,13 +274,15 @@ def test_profile_list_filter_is_explicit_and_matches_usernames(window, qtbot, tm
 
 def test_hd_mass_only_screen(window, qtbot):
     assert window.download_tab.findChildren(QComboBox) == [window.profile_usernames, window.profile_scans]
+    assert window.api_tab.isAncestorOf(window.api_usage)
+    assert not window.download_tab.isAncestorOf(window.api_usage)
     assert window.source.mapTo(window, window.source.rect().bottomLeft()).y() < window.profile_scans.mapTo(window, window.profile_scans.rect().topLeft()).y()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
     assert window.download_tab.findChildren(QCheckBox) == [window.auto_continue, window.checks["images_only"],
                                                            window.checks["notifications"], window.auto_download,
                                                            window.remember_settings]
-    assert window.settings_tab.findChildren(QCheckBox) == [window.checks["json_logs"], window.checks["download_logs"]]
+    assert window.settings_tab.findChildren(QCheckBox) == [window.checks["download_logs"]]
     assert window.scan_delay.parentWidget().title() == "Scan Profiles"
     assert window.auto_continue.parentWidget().title() == "Scan Profiles"
     assert window.auto_continue.text() == "&Auto continue to next to scan"
@@ -296,6 +302,8 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.download_videos.text() == "&Download Profile"
     assert not window.download_videos.isEnabled()
     assert window.start_indexing.isEnabled()
+    assert window.api_usage.isReadOnly()
+    assert window.api_usage.toPlainText() == "Waiting for server-reported API usage."
     qtbot.keyClicks(window.source, "@alice")
     assert window.source.text() == "@alice"
 
@@ -397,7 +405,7 @@ def test_auto_continue_finishes_when_all_later_profiles_are_scanned(window, tmp_
     assert scans == []
     assert not window.auto_continuing
     assert window.profile_usernames.currentText() == "alice"
-    assert window.statusBar().currentMessage() == "Scan complete — 1 results. Click Download Profile."
+    assert "Scan complete — 1 results. Click Download Profile" in application_log(window)
 
 
 def test_stop_cancels_auto_continue_routine(window):
@@ -453,7 +461,7 @@ def test_native_defaults(window, qtbot):
     assert window.source.hasFocus()
 
 def test_settings(window, tmp_path):
-    settings = AppConfig(folder=str(tmp_path), images_only=True, json_logs=True, download_logs=True, notifications=True)
+    settings = AppConfig(folder=str(tmp_path), images_only=True, download_logs=True, notifications=True)
     path = tmp_path / "config.json"
     settings.save(path)
     assert Settings(tmp_path).values == settings
@@ -485,21 +493,69 @@ def test_indexing_events_without_page(window, monkeypatch):
     monkeypatch.setattr(window.process, "readLine", events.readLine)
 
     window.read_events()
+    window.tail_log()
 
-    assert window.log.toPlainText().splitlines() == [
-        "Indexed 1 unique posts, 1 new posts found",
-        "Indexed 1 unique posts, 0 new posts found",
-    ]
-    assert window.statusBar().currentMessage() == window.log.toPlainText().splitlines()[-1]
+    assert "Indexed 1 unique posts, 1 new posts found" in window.log.toPlainText()
+    assert "Indexed 1 unique posts, 0 new posts found" in window.log.toPlainText()
+    assert window.log.toPlainText() == application_log(window)
     assert window.scanned_links == ["https://www.tiktok.com/@alice/video/123"]
     assert window.completed
+
+
+def test_api_usage_and_limit_events_update_downloader_ui(window, monkeypatch):
+    events = QBuffer()
+    events.setData(
+        b'{"type":"api_usage","remaining":"0","reset_seconds":"35452",'
+        b'"message":"Free Api Limit: 10000 request/ 1 day."}\n'
+        b'{"type":"api_error","media_id":"7679001804776017160","status_code":200,'
+        b'"request_url":"https://www.tikwm.com/api/?url=7679001804776017160&hd=1",'
+        b'"remaining":"0","reset_seconds":"35452","response":{"code":-1,'
+        b'"msg":"Free Api Limit: 10000 request/ 1 day."},'
+        b'"response_body":"{\\"code\\":-1,\\"msg\\":\\"Free Api Limit: 10000 request/ 1 day.\\"}",'
+        b'"response_path":"M:/downloads/user/Data/json/7679001804776017160_HD.json"}\n'
+        b'{"type":"done","stopped":false,"failed":true}\n'
+    )
+    events.open(QIODevice.OpenModeFlag.ReadOnly)
+    monkeypatch.setattr(window.process, "canReadLine", events.canReadLine)
+    monkeypatch.setattr(window.process, "readLine", events.readLine)
+    window.auto_continuing = True
+
+    window.read_events()
+    window.tail_log()
+
+    assert window.api_usage.toPlainText() == (
+        "Requests remaining: 0\n"
+        "Reset in: 35452 seconds\n"
+        "Status: Free Api Limit: 10000 request/ 1 day."
+    )
+    assert "TikWM API response for post 7679001804776017160" in window.log.toPlainText()
+    assert "Request: https://www.tikwm.com/api/?url=7679001804776017160&hd=1" in window.log.toPlainText()
+    assert "HTTP status: 200" in window.log.toPlainText()
+    assert "Saved response: M:/downloads/user/Data/json/7679001804776017160_HD.json" in window.log.toPlainText()
+    assert '{"code":-1,"msg":"Free Api Limit: 10000 request/ 1 day."}' in window.log.toPlainText()
+    assert window.log.toPlainText() == application_log(window)
+    assert not window.completed
+    assert not window.auto_continuing
+
+
+def test_start_job_preserves_existing_log(window, monkeypatch, job_factory):
+    monkeypatch.setattr(window.process, "start", lambda: None)
+    monkeypatch.setattr(window.process, "write", lambda _: None)
+    window.logger.info("Existing activity")
+    window.tail_log()
+    before = window.log.toPlainText()
+
+    window.start_job(job_factory())
+
+    window.tail_log()
+    assert before in window.log.toPlainText()
+    assert "Existing activity" in window.log.toPlainText()
+    assert "Opening browser" in window.log.toPlainText()
 
 
 @pytest.mark.parametrize("automatic", [True, False])
 def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory, server, automatic):
     window.auto_download.setChecked(automatic)
-    statuses = []
-    window.statusBar().messageChanged.connect(statuses.append)
     job = job_factory(manual_start=True, headless=False)
     window.start_job(job)
     assert not window.download.isEnabled()
@@ -512,13 +568,12 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
     qtbot.mouseClick(window.start_indexing, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     if not automatic:
-        assert window.statusBar().currentMessage() == "Scan complete — 2 results. Click Download Profile."
+        assert "Scan complete — 2 results. Click Download Profile" in application_log(window)
         assert window.download_videos.isEnabled()
         qtbot.wait(500)
         assert server[1]["/api/hd"] == 0
         assert not list(Path(job.folder).rglob("*.mp4"))
     assert (Path(job.scan_dir) / "alice_combined_links.txt").read_text().splitlines() == window.scanned_links
-    assert not window.status_timer.isActive()
     browser_visits = server[1]["/@alice"]
     if not automatic:
         qtbot.mouseClick(window.download_videos, Qt.MouseButton.LeftButton)
@@ -527,20 +582,17 @@ def test_real_browser_waits_for_start_then_downloads(window, qtbot, job_factory,
         qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
     assert window.download_videos.isEnabled()
     assert server[1]["/@alice"] == browser_visits
-    assert window.statusBar().currentMessage() == "Completed"
+    assert "Completed" in application_log(window)
     window.source.setText("@another")
     assert not window.download_videos.isEnabled()
     assert server[1]["/api/hd"] == 2
     assert (Path(job.folder) / "alice" / "video" / "123_HD.mp4").exists()
     assert window.download.isEnabled()
     assert window.start_indexing.isEnabled()
-    assert any(message.startswith("Indexed 1 unique posts, 1 new posts found") for message in statuses)
-    assert any(message.startswith("Indexed 2 unique posts, 1 new posts found") for message in statuses)
-    assert "Downloading (1/2) — 0 bytes downloaded — 0.00 MB/s — ETA calculating…" in statuses
-    assert any(message.startswith("Downloading (2/2) — ") and "MB/s — ETA" in message for message in statuses)
-    assert not window.status_timer.isActive()
-    qtbot.wait(1100)
-    assert window.statusBar().currentMessage() == "Completed"
+    assert "Indexed 1 unique posts, 1 new posts found" in application_log(window)
+    assert "Indexed 2 unique posts, 1 new posts found" in application_log(window)
+    assert "Downloading (1/2)" in application_log(window)
+    assert "Downloading (2/2)" in application_log(window)
 
 def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
     job = job_factory(manual_start=True)
@@ -550,7 +602,7 @@ def test_stop_while_waiting_does_not_crawl(window, qtbot, job_factory, server):
     qtbot.waitUntil(lambda: window.start_indexing.isEnabled(), timeout=30000)
     qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
-    assert window.statusBar().currentMessage() == "Stopped"
+    assert "Stopped" in application_log(window)
     assert not window.download_videos.isEnabled()
     assert server[1]["/indexing"] == 0
     assert server[1]["/api/hd"] == 0
@@ -581,19 +633,18 @@ def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server,
             descendants.update(children)
         assert any(p["ProcessId"] in descendants and p["Name"] == "chrome.exe" for p in processes)
     assert not window.reset_session_button.isEnabled()
-    retained_log = window.log.toPlainText()
+    retained_log = application_log(window)
     qtbot.mouseClick(window.reset_session_button, Qt.MouseButton.LeftButton)
     assert window.scanned_job is job
     assert window.process.state() != QProcess.ProcessState.NotRunning
-    assert window.log.toPlainText() == retained_log
+    assert retained_log in application_log(window)
     qtbot.mouseClick(window.stop, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=5000)
     assert window.process.state() == QProcess.ProcessState.NotRunning
-    assert window.statusBar().currentMessage() == "Stopped"
+    assert "Stopped" in application_log(window)
     assert window.scanned_links is None
     assert window.scanned_job is job
     assert window.download_progress is None
-    assert not window.status_timer.isActive()
     assert window.scanning
     assert not window.paused
     assert window.start_indexing.isEnabled()
@@ -602,7 +653,7 @@ def test_stop_closes_scan_and_allows_restart(window, qtbot, job_factory, server,
     assert not window.stop.isEnabled()
     assert window.download.isEnabled()
     assert window.reset_session_button.isEnabled() == window.preferences.session_path.is_file()
-    assert window.log.toPlainText() == retained_log
+    assert retained_log in application_log(window)
     assert existing.read_text() == "previously collected URLs"
     assert server[1]["/api/hd"] == 0
     if stage == "setup":
@@ -619,7 +670,8 @@ def test_clear_session_deletes_browser_state_without_changing_scan(window, qtbot
     window.destination.setText(str(tmp_path))
     window.scanned_links = ["https://www.tiktok.com/@alice/video/123"]
     window.auto_download.setChecked(False)
-    window.log.appendPlainText("Previous activity")
+    window.logger.info("Previous activity")
+    window.tail_log()
     window.progress.setRange(0, 5)
     window.progress.setValue(3)
     window.preferences.session_path.write_text('{"cookies": []}')
@@ -633,11 +685,13 @@ def test_clear_session_deletes_browser_state_without_changing_scan(window, qtbot
     assert not window.preferences.session_path.exists()
     assert not window.reset_session_button.isEnabled()
     assert window.process.state() == QProcess.ProcessState.NotRunning
-    assert window.log.toPlainText() == "Previous activity"
+    window.tail_log()
+    assert "Previous activity" in window.log.toPlainText()
+    assert "Saved browser session cleared" in window.log.toPlainText()
     assert window.progress.value() == 3
     assert window.scanned_links == ["https://www.tiktok.com/@alice/video/123"]
     assert window.download_videos.isEnabled()
-    assert window.statusBar().currentMessage() == "Saved browser session cleared."
+    assert "Saved browser session cleared" in application_log(window)
 
 
 def test_stop_discards_queued_scan_completion(window, monkeypatch):
@@ -655,7 +709,7 @@ def test_stop_discards_queued_scan_completion(window, monkeypatch):
     window.process_finished(1, QProcess.ExitStatus.CrashExit)
     assert jobs == []
     assert window.scanned_links is None
-    assert window.statusBar().currentMessage() == "Stopped"
+    assert "Stopped" in application_log(window)
 
 
 @pytest.mark.parametrize("action", ["stop", "close"])
@@ -673,10 +727,13 @@ def test_stop_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
 
         def do_GET(self):
             if self.path.startswith("/api/"):
-                body = json.dumps({"data": {"author": {"unique_id": "alice"},
+                body = json.dumps({"code": 0, "msg": "success",
+                    "data": {"author": {"unique_id": "alice"},
                     "hdplay": f"http://127.0.0.1:{self.server.server_port}/media"}}).encode()
                 self.send_response(200)
                 self.send_header("Content-Length", str(len(body)))
+                self.send_header("X-Limit-Request-Remaining", "4321")
+                self.send_header("X-Limit-Request-Reset", "3600")
                 self.end_headers()
                 self.wfile.write(body)
             else:
@@ -712,7 +769,7 @@ def test_stop_interrupts_blocked_transfer(window, qtbot, tmp_path, action):
     assert window.download_progress is not None
     assert partial.exists()
     assert not partial.with_suffix("").exists()
-    assert window.statusBar().currentMessage() == "Stopped"
+    assert "Stopped" in application_log(window)
     if action == "close":
         assert not window.isVisible()
 
@@ -723,9 +780,10 @@ def test_worker_traceback(window, qtbot, job_factory, server):
     assert server[1]["/unavailable"] == 0
     qtbot.mouseClick(window.download_videos, Qt.MouseButton.LeftButton)
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
+    window.tail_log()
     assert "Traceback" in window.log.toPlainText()
     assert "503" in window.log.toPlainText()
-    assert "code 1" in window.statusBar().currentMessage()
+    assert "Process exited with code 1" in application_log(window)
     assert window.download.isEnabled()
 
 
@@ -760,7 +818,7 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, aut
     assert window.scanned_job.source == "https://www.tiktok.com/@alice"
     assert window.scanned_job.folder == str(folder)
     assert window.download_videos.isEnabled()
-    assert window.statusBar().currentMessage() == "Scan restored — 2 results."
+    assert "Scan restored — 2 results" in application_log(window)
     assert window.process.state() == QProcess.ProcessState.NotRunning
     assert sum(server[1].values()) == 0
     window.scanned_job.hd_api = server[0] + "/api/hd"
@@ -770,7 +828,7 @@ def test_restore_scan_then_download(window, qtbot, tmp_path, server, source, aut
     window.auto_download.setChecked(not automatic)
     assert not window.download_videos.isEnabled()
     qtbot.waitUntil(lambda: window.process.state() == QProcess.ProcessState.NotRunning, timeout=30000)
-    assert window.statusBar().currentMessage() == "Completed"
+    assert "Completed" in application_log(window)
     assert (folder / "alice" / "video" / "123_HD.mp4").exists()
     assert server[1]["/@alice"] == 0
     assert server[1]["/api/hd"] == 2
@@ -822,4 +880,4 @@ def test_restore_missing_scan_disables_download(window, qtbot, tmp_path):
     qtbot.mouseClick(window.restore_scan_button, Qt.MouseButton.LeftButton)
     assert not window.download_videos.isEnabled()
     assert window.scanned_links is None
-    assert window.statusBar().currentMessage() == f"No saved scan found: {path}"
+    assert f"No saved scan found: {path}" in application_log(window)

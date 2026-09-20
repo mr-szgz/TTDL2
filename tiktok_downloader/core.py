@@ -17,7 +17,6 @@ class Job:
     images_only: bool = False
     video_dir: str = "video"
     image_dir: str = "photo"
-    json_logs: bool = False
     download_logs: bool = False
     browser: str = "chromium"
     executable: str = ""
@@ -178,8 +177,37 @@ class Downloader:
             return False
         with session.get(job.hd_api, params={"url": media_id, "hd": "1"}, timeout=120) as response:
             response.raise_for_status()
-            raw = response.json()
+            response_body = response.text
+            raw = json.loads(response_body)
+            status_code = response.status_code
+            request_url = response.url
+            remaining = response.headers.get("X-Limit-Request-Remaining")
+            reset_seconds = response.headers.get("X-Limit-Request-Reset")
+            self.emit({
+                "type": "api_usage",
+                "remaining": remaining,
+                "reset_seconds": reset_seconds,
+                "message": raw["msg"],
+            })
         self.metadata_ready_at = monotonic() + 1.0
+        root = Path(job.folder) / filename_component(username)
+        json_dir = root / "Data" / "json"
+        json_dir.mkdir(parents=True, exist_ok=True)
+        response_path = json_dir / f"{media_id}_HD.json"
+        response_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+        if raw["code"] != 0:
+            self.emit({
+                "type": "api_error",
+                "media_id": media_id,
+                "status_code": status_code,
+                "request_url": request_url,
+                "remaining": remaining,
+                "reset_seconds": reset_seconds,
+                "response": raw,
+                "response_body": response_body,
+                "response_path": str(response_path),
+            })
+            return False
         data = raw["data"]
         username = data["author"]["unique_id"]
         if kind == "photo":
@@ -187,14 +215,8 @@ class Downloader:
                       for i, image in enumerate(data["images"], 1)]
         else:
             assets = [("video", f"{media_id}_HD.mp4", data["hdplay"], f"{media_id}_HD")]
-        root = Path(job.folder) / filename_component(username)
-        root.mkdir(parents=True, exist_ok=True)
         index_dir = Path(job.index_dir)
         index_dir.mkdir(parents=True, exist_ok=True)
-        if job.json_logs:
-            json_dir = root / "Data" / "json"
-            json_dir.mkdir(parents=True, exist_ok=True)
-            (json_dir / f"{media_id}_HD.json").write_text(json.dumps(raw, indent=2), encoding="utf-8")
         for category, name, asset_url, index_id in assets:
             if not self.control.checkpoint():
                 return False
@@ -248,6 +270,7 @@ class Downloader:
 
     def run(self, links):
         self.emit({"type": "progress", "current": 0, "total": len(links)})
+        failed = False
         with requests.Session() as session:
             session.headers.update({"User-Agent": "TikTokDownloader2/2.0", "Accept-Encoding": "identity"})
             for current, link in enumerate(links, 1):
@@ -255,6 +278,10 @@ class Downloader:
                     break
                 self.emit({"type": "downloading", "current": current, "total": len(links)})
                 if not self.media(link, session):
+                    failed = not self.control.stopped.is_set()
                     break
                 self.emit({"type": "progress", "current": current, "total": len(links)})
-        self.emit({"type": "done", "stopped": self.control.stopped.is_set()})
+        event = {"type": "done", "stopped": self.control.stopped.is_set()}
+        if failed:
+            event["failed"] = True
+        self.emit(event)

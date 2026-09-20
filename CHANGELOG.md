@@ -7,9 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.5] - 2026-09-20
+
 ### Added
 
 - Add an **Auto continue to next to scan** option that advances through profiles without saved scans, waiting for automatic downloads when enabled and stopping with the active operation.
+- Add an **API** tab with TikWM and TikTok Direct method settings.
+- Show TikWM's server-reported remaining requests, reset interval, and status in the API tab.
+
+### Changed
+
+- Always save TikWM API responses under each profile's `Data/json` folder and remove the API JSON setting.
+- Write application activity through Python logging to `application.log` in the app state directory and make the activity console tail that file.
+- Remove status-bar activity messages in favor of the persistent application log.
+
+### Fixed
+
+- Handle TikWM API limit responses without crashing the download worker or continuing the automatic profile routine.
 
 ## [3.4.4] - 2026-09-19
 
@@ -143,7 +157,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.4...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.5...HEAD
+[3.4.5]: https://github.com/mr-szgz/ttdl2/compare/v3.4.4...v3.4.5
 [3.4.4]: https://github.com/mr-szgz/ttdl2/compare/v3.4.3...v3.4.4
 [3.4.3]: https://github.com/mr-szgz/ttdl2/compare/v3.4.2...v3.4.3
 [3.4.2]: https://github.com/mr-szgz/ttdl2/compare/v3.4.1...v3.4.2

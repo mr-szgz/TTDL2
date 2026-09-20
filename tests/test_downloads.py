@@ -7,7 +7,7 @@ from tiktok_downloader.core import Control, Downloader, filename_component, post
 
 @pytest.mark.parametrize(("video_dir", "image_dir"), [("video", "photo"), ("Videos", "Images")])
 def test_hd_mass_download(job_factory, server, video_dir, image_dir):
-    job = job_factory(json_logs=True, download_logs=True, video_dir=video_dir, image_dir=image_dir)
+    job = job_factory(download_logs=True, video_dir=video_dir, image_dir=image_dir)
     events = []
     downloader = Downloader(job, events.append, Control())
     downloader.run(downloader.scan())
@@ -36,6 +36,10 @@ def test_hd_mass_download(job_factory, server, video_dir, image_dir):
     assert [event for event in events if event["type"] == "downloading"] == [
         {"type": "downloading", "current": 1, "total": 2},
         {"type": "downloading", "current": 2, "total": 2},
+    ]
+    assert [event for event in events if event["type"] == "api_usage"][:2] == [
+        {"type": "api_usage", "remaining": "4321", "reset_seconds": "3600", "message": "success"},
+        {"type": "api_usage", "remaining": "4321", "reset_seconds": "3600", "message": "success"},
     ]
     assert server[1]["/api/standard"] == 0
     assert server[1]["/media/watermark.mp4"] == 0
@@ -106,6 +110,27 @@ def test_missing_media_is_skipped_and_batch_continues(job_factory, server):
     assert {"type": "log", "message": "Skipped unavailable media: 123_HD.mp4 (HTTP 404)"} in events
     assert events[-1] == {"type": "done", "stopped": False}
 
+
+def test_api_limit_is_saved_and_reported_without_crashing(job_factory, server):
+    job = job_factory(hd_api=server[0] + "/api/limit")
+    events = []
+    Downloader(job, events.append, Control()).run([server[0] + "/@alice/video/123"])
+
+    response_path = Path(job.folder) / "alice" / "Data" / "json" / "123_HD.json"
+    assert json.loads(response_path.read_text()) == {
+        "code": -1, "msg": "Free Api Limit: 10000 request/ 1 day."
+    }
+    assert {"type": "api_usage", "remaining": "4321", "reset_seconds": "3600",
+            "message": "Free Api Limit: 10000 request/ 1 day."} in events
+    assert {"type": "api_error", "media_id": "123", "status_code": 200,
+            "request_url": server[0] + "/api/limit?url=123&hd=1", "remaining": "4321",
+            "reset_seconds": "3600",
+            "response": {"code": -1, "msg": "Free Api Limit: 10000 request/ 1 day."},
+            "response_body": '{"code": -1, "msg": "Free Api Limit: 10000 request/ 1 day."}',
+            "response_path": str(response_path)} in events
+    assert events[-1] == {"type": "done", "stopped": False, "failed": True}
+    assert not list(Path(job.folder).rglob("*.mp4"))
+
 def test_parsing(tmp_path):
     assert post_parts("https://www.tiktok.com/@a.b/photo/123/?x=1") == ("a.b", "photo", "123")
     assert profile_name("https://www.tiktok.com/@a.b/?lang=en") == "a.b"
@@ -137,7 +162,8 @@ def test_downloads_reuse_connection_without_per_file_wait(tmp_path):
             if self.path.startswith("/api/"):
                 metadata_times.append(monotonic())
                 origin = f"http://127.0.0.1:{self.server.server_port}"
-                body = json.dumps({"data": {"author": {"unique_id": "ayvah.nizzari"},
+                body = json.dumps({"code": 0, "msg": "success",
+                    "data": {"author": {"unique_id": "ayvah.nizzari"},
                     "hdplay": origin + "/video", "images": [origin + "/1", origin + "/2"]}}).encode()
             else:
                 body = payload

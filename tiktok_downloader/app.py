@@ -1,6 +1,7 @@
 from dataclasses import asdict
 import codecs
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -8,7 +9,7 @@ import subprocess
 import sys
 
 from PySide6.QtCore import QByteArray, QProcess, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QIcon
+from PySide6.QtGui import QDesktopServices, QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QDialog, QDialogButtonBox, QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel,
@@ -182,6 +183,14 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.preferences = Settings(config_dir if config_dir is not None else CONFIG_DIR)
         self.settings = self.preferences.values
+        self.logger = logging.getLogger(f"{__name__}.{id(self)}")
+        self.logger.setLevel(logging.INFO)
+        self.logger.propagate = False
+        self.log_handler = logging.FileHandler(self.preferences.log_path, encoding="utf-8")
+        self.log_handler.setFormatter(logging.Formatter(
+            "%(asctime)s | %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S"))
+        self.logger.addHandler(self.log_handler)
+        self.logger.info("Application started")
         self.process = QProcess(self)
         self.stderr_decoder = codecs.getincrementaldecoder("utf-8")()
         self.process.readyReadStandardOutput.connect(self.read_events)
@@ -199,14 +208,10 @@ class MainWindow(QMainWindow):
         self.stopping = False
         self.completed = False
         self.auto_continuing = False
-        self.work_status = "Ready"
         self.download_progress = None
         self.scanned_links = None
         self.scanned_job = None
         self.scanning = False
-        self.status_timer = QTimer(self)
-        self.status_timer.setInterval(1000)
-        self.status_timer.timeout.connect(self.show_work_status)
         self.setWindowTitle(f"ttdl2 - v{__version__}")
         self.setWindowIcon(QIcon(str(Path(__file__).resolve().parent.parent / "assets" / "purple" / "ttdl2-icon-purple.ico")))
         self.resize(840, 660)
@@ -242,12 +247,18 @@ class MainWindow(QMainWindow):
         self.download_tab.setFrameShape(QFrame.Shape.NoFrame)
         download_content = QWidget()
         self.download_tab.setWidget(download_content)
+        self.api_tab = QScrollArea()
+        self.api_tab.setWidgetResizable(True)
+        self.api_tab.setFrameShape(QFrame.Shape.NoFrame)
+        api_content = QWidget()
+        self.api_tab.setWidget(api_content)
         self.settings_tab = QScrollArea()
         self.settings_tab.setWidgetResizable(True)
         self.settings_tab.setFrameShape(QFrame.Shape.NoFrame)
         settings_content = QWidget()
         self.settings_tab.setWidget(settings_content)
         self.tabs.addTab(self.download_tab, "Downloader")
+        self.tabs.addTab(self.api_tab, "API")
         self.tabs.addTab(self.settings_tab, "Settings")
         layout.addWidget(self.tabs, 1)
         layout = QVBoxLayout(download_content)
@@ -470,6 +481,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.progress)
         self.log = QPlainTextEdit()
         self.log.setObjectName("activityLog")
+        self.log.setAccessibleName("Application log file tail")
         self.log.setReadOnly(True)
         layout.addWidget(self.log, 1)
         log_actions = QHBoxLayout()
@@ -487,7 +499,66 @@ class MainWindow(QMainWindow):
         self.copy_logs_button.clicked.connect(self.log.copy)
         log_actions.addWidget(self.copy_logs_button)
         layout.addLayout(log_actions)
-        self.statusBar().showMessage("Ready")
+        self.log_reader = self.preferences.log_path.open("r", encoding="utf-8")
+        self.log_timer = QTimer(self)
+        self.log_timer.setInterval(100)
+        self.log_timer.timeout.connect(self.tail_log)
+        self.tail_log()
+        self.log_timer.start()
+        api_layout = QVBoxLayout(api_content)
+        api_layout.setSpacing(12)
+        api_form = QFormLayout()
+        self.api_method = QComboBox()
+        self.api_method.setObjectName("apiMethod")
+        self.api_method.setAccessibleName("Download API method")
+        self.api_method.addItem("TikWM", "tikwm")
+        self.api_method.addItem("TikTok Direct", "tiktok_direct")
+        self.api_method.setCurrentIndex(self.api_method.findData(self.settings.api_method))
+        api_method_label = QLabel("&Method")
+        api_method_label.setBuddy(self.api_method)
+        api_form.addRow(api_method_label, self.api_method)
+        api_layout.addLayout(api_form)
+        self.tikwm_api_group = QGroupBox("TikWM API")
+        tikwm_api_form = QFormLayout(self.tikwm_api_group)
+        self.tikwm_api_key = QLineEdit(self.settings.tikwm_api_key)
+        self.tikwm_api_key.setObjectName("tikwmApiKey")
+        self.tikwm_api_key.setAccessibleName("TikWM API key")
+        self.tikwm_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.tikwm_api_key.textChanged.connect(lambda value: self.update_option("tikwm_api_key", value))
+        tikwm_api_key_label = QLabel("API &key (optional)")
+        tikwm_api_key_label.setBuddy(self.tikwm_api_key)
+        tikwm_api_form.addRow(tikwm_api_key_label, self.tikwm_api_key)
+        self.api_usage = QPlainTextEdit()
+        self.api_usage.setObjectName("apiUsage")
+        self.api_usage.setAccessibleName("TikWM API usage for the last 24 hours")
+        self.api_usage.setReadOnly(True)
+        self.api_usage.setPlainText("Waiting for server-reported API usage.")
+        self.api_usage.setMaximumHeight(self.api_usage.fontMetrics().lineSpacing() * 4 + 24)
+        api_usage_label = QLabel("&Usage (last 24 hours)")
+        api_usage_label.setBuddy(self.api_usage)
+        tikwm_api_form.addRow(api_usage_label, self.api_usage)
+        api_layout.addWidget(self.tikwm_api_group)
+        self.tiktok_direct_group = QGroupBox("TikTok Direct")
+        tiktok_direct_form = QFormLayout(self.tiktok_direct_group)
+        self.tiktok_device_id = QLineEdit(self.settings.tiktok_device_id)
+        self.tiktok_device_id.setObjectName("tiktokDeviceId")
+        self.tiktok_device_id.setAccessibleName("TikTok device ID")
+        self.tiktok_device_id.textChanged.connect(lambda value: self.update_option("tiktok_device_id", value))
+        tiktok_device_id_label = QLabel("&Device ID")
+        tiktok_device_id_label.setBuddy(self.tiktok_device_id)
+        tiktok_direct_form.addRow(tiktok_device_id_label, self.tiktok_device_id)
+        self.tiktok_cookie = QLineEdit(self.settings.tiktok_cookie)
+        self.tiktok_cookie.setObjectName("tiktokCookie")
+        self.tiktok_cookie.setAccessibleName("TikTok cookie")
+        self.tiktok_cookie.setEchoMode(QLineEdit.EchoMode.Password)
+        self.tiktok_cookie.textChanged.connect(lambda value: self.update_option("tiktok_cookie", value))
+        tiktok_cookie_label = QLabel("&Cookie (optional)")
+        tiktok_cookie_label.setBuddy(self.tiktok_cookie)
+        tiktok_direct_form.addRow(tiktok_cookie_label, self.tiktok_cookie)
+        api_layout.addWidget(self.tiktok_direct_group)
+        api_layout.addStretch()
+        self.api_method.currentIndexChanged.connect(self.update_api_method)
+        self.update_api_method()
         settings_layout = QVBoxLayout(settings_content)
         settings_form = QFormLayout()
         self.config_path = QLineEdit(str(self.preferences.config_path))
@@ -555,7 +626,7 @@ class MainWindow(QMainWindow):
         self.image_dir.textChanged.connect(lambda value: self.update_option("image_dir", value))
         downloads_form.addRow("Image folder", self.image_dir)
         downloads_options = QHBoxLayout()
-        for key, title in [("json_logs", "Save API JSON"), ("download_logs", "Save download log")]:
+        for key, title in [("download_logs", "Save download log")]:
             check = QCheckBox(title)
             check.setChecked(getattr(self.settings, key))
             check.toggled.connect(lambda checked, name=key: self.update_option(name, checked))
@@ -632,15 +703,17 @@ class MainWindow(QMainWindow):
         self.browser_install_process.start()
 
     def read_browser_install_output(self):
-        self.log.appendPlainText(self.browser_install_decoder.decode(
-            bytes(self.browser_install_process.readAllStandardOutput())))
+        output = self.browser_install_decoder.decode(
+            bytes(self.browser_install_process.readAllStandardOutput()))
+        if output:
+            self.logger.info(output.rstrip())
 
     def browser_install_finished(self, code, status):
         self.read_browser_install_output()
         self.set_busy(False)
         self.download_videos.setEnabled(bool(self.scanned_links))
         self.check_browser()
-        self.statusBar().showMessage(f"Browser installer exited with code {code}")
+        self.logger.info("Browser installer exited with code %s", code)
         if self.closing:
             self.close()
 
@@ -672,7 +745,7 @@ class MainWindow(QMainWindow):
         path = Path(self.profile_list.text())
         path.write_text("\n".join(profiles) + ("\n" if profiles else ""), encoding="utf-8")
         self.load_profile_list()
-        self.statusBar().showMessage("Profile list saved.")
+        self.logger.info("Profile list saved: %s", path)
 
     def select_managed_profile(self, profile):
         index = self.profile_usernames.findText(profile_name(profile))
@@ -698,7 +771,7 @@ class MainWindow(QMainWindow):
                     file.write("\n")
                 file.write("\n".join(additions) + "\n")
         self.load_profile_list()
-        self.statusBar().showMessage(f"Added {len(additions)} scanned usernames to profile list.")
+        self.logger.info("Added %s scanned usernames to profile list", len(additions))
 
     def select_profile(self, index):
         profile = self.profile_usernames.itemData(index)
@@ -735,14 +808,22 @@ class MainWindow(QMainWindow):
 
     def update_option(self, name, checked):
         setattr(self.settings, name, checked)
-        if self.scanned_job is not None and name not in {"notifications", "remember_settings"}:
+        if self.scanned_job is not None and name not in {
+                "notifications", "remember_settings", "api_method", "tikwm_api_key",
+                "tiktok_device_id", "tiktok_cookie"}:
             setattr(self.scanned_job, name, checked)
+
+    def update_api_method(self):
+        method = self.api_method.currentData()
+        self.update_option("api_method", method)
+        self.tikwm_api_group.setEnabled(method == "tikwm")
+        self.tiktok_direct_group.setEnabled(method == "tiktok_direct")
 
     def save_config(self):
         self.preferences.save_config(**self.settings.model_dump(exclude=set(AppState.model_fields)))
         self.preferences.save_state(self.current_state())
         self.settings = self.preferences.values
-        self.statusBar().showMessage("Configuration saved.")
+        self.logger.info("Configuration saved")
 
     def apply_settings(self):
         self.remember_settings.setChecked(self.settings.remember_settings)
@@ -752,6 +833,11 @@ class MainWindow(QMainWindow):
         self.profile_usernames.setCurrentIndex(self.profile_usernames.findText(self.settings.selected_username))
         self.browser.setCurrentText(self.settings.browser)
         self.executable.setText(self.settings.executable)
+        self.api_method.setCurrentIndex(self.api_method.findData(self.settings.api_method))
+        self.tikwm_api_key.setText(self.settings.tikwm_api_key)
+        self.tiktok_device_id.setText(self.settings.tiktok_device_id)
+        self.tiktok_cookie.setText(self.settings.tiktok_cookie)
+        self.update_api_method()
         self.video_dir.setText(self.settings.video_dir)
         self.image_dir.setText(self.settings.image_dir)
         for name, check in self.checks.items():
@@ -767,10 +853,12 @@ class MainWindow(QMainWindow):
         self.preferences.reset_state()
         self.settings = self.preferences.values
         self.apply_settings()
-        self.statusBar().showMessage("Defaults restored. Click Save Settings to keep these values.")
+        self.logger.info("Defaults restored; click Save Settings to keep these values")
 
     def start_download(self, checked=False):
-        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
+        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username",
+                                                     "notifications", "remember_settings", "api_method",
+                                                     "tikwm_api_key", "tiktok_device_id", "tiktok_cookie"})
         self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
                            new_session=True, **settings))
 
@@ -807,19 +895,19 @@ class MainWindow(QMainWindow):
         if path.exists():
             self.source.setText(f"https://www.tiktok.com/@{username.lstrip('@')}")
             self.scanned_links = read_links(path)
-            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
+            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username",
+                                                         "notifications", "remember_settings", "api_method",
+                                                         "tikwm_api_key", "tiktok_device_id", "tiktok_cookie"})
             self.scanned_job = Job(source=self.source.text(), folder=self.destination.text(), **settings)
             self.download_progress = None
             self.paused = self.stopping = False
             self.progress.setRange(0, max(len(self.scanned_links), 1))
             self.progress.setValue(0)
             self.progress.setFormat(f"{len(self.scanned_links)} scanned posts")
-            self.work_status = f"Scan restored — {len(self.scanned_links)} results."
-            self.log.appendPlainText(f"{self.work_status} Loaded {path}")
-            self.statusBar().showMessage(self.work_status)
+            self.logger.info("Scan restored — %s results. Loaded %s", len(self.scanned_links), path)
             self.download_videos.setEnabled(bool(self.scanned_links))
         else:
-            self.statusBar().showMessage(f"No saved scan found: {path}")
+            self.logger.error("No saved scan found: %s", path)
 
     def start_job(self, job, links=None):
         job.session_path = str(self.preferences.session_path)
@@ -827,7 +915,6 @@ class MainWindow(QMainWindow):
         job.index_dir = str(self.preferences.index_dir)
         if self.settings.remember_settings:
             self.save_config()
-        self.status_timer.stop()
         self.download_progress = None
         self.scanning = links is None
         if self.scanning:
@@ -837,13 +924,12 @@ class MainWindow(QMainWindow):
         self.stderr_decoder.reset()
         self.start_indexing.setEnabled(False)
         self.completed = self.stopping = self.paused = False
-        self.work_status = "Opening browser" if self.scanning else "Starting downloads"
+        operation = "Opening browser" if self.scanning else "Starting downloads"
         self.pause.setText("&Pause")
-        self.log.clear()
         self.progress.setRange(0, 0)
         self.set_busy(True)
         self.pause.setEnabled(not self.scanning)
-        self.statusBar().showMessage(self.work_status)
+        self.logger.info(operation)
         self.process.setProgram(str(Path(sys.executable).with_name("python.exe")))
         self.process.setArguments(["-u", "-m", "tiktok_downloader.worker"])
         self.process.start()
@@ -861,6 +947,7 @@ class MainWindow(QMainWindow):
             control.setEnabled(not busy)
         self.download_videos.setEnabled(not busy and bool(self.scanned_links))
         self.download.setEnabled(not busy)
+        self.api_tab.setEnabled(not busy)
         self.settings_tab.setEnabled(not busy)
         self.pause.setEnabled(busy)
         self.stop.setEnabled(busy)
@@ -874,12 +961,14 @@ class MainWindow(QMainWindow):
                 self.download_progress.resume()
         self.process.write(b"pause\n" if self.paused else b"resume\n")
         self.pause.setText("&Resume" if self.paused else "&Pause")
-        self.show_work_status()
+        self.logger.info("Paused" if self.paused else "Resumed")
 
     def begin_indexing(self):
         self.auto_continuing = self.auto_continue.isChecked()
         if self.process.state() == QProcess.ProcessState.NotRunning:
-            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username", "notifications", "remember_settings"})
+            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username",
+                                                         "notifications", "remember_settings", "api_method",
+                                                         "tikwm_api_key", "tiktok_device_id", "tiktok_cookie"})
             self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
                                manual_start=False, **settings))
             return
@@ -890,18 +979,16 @@ class MainWindow(QMainWindow):
         self.process.write(b"resume\n")
         self.pause.setText("&Pause")
         self.pause.setEnabled(True)
-        self.work_status = "Indexing profile — 0 results"
-        self.show_work_status()
+        self.logger.info("Indexing profile — 0 results")
 
     def stop_download(self):
         self.auto_continuing = False
         self.stopping = True
-        self.status_timer.stop()
         self.download.setEnabled(False)
         self.start_indexing.setEnabled(False)
         self.pause.setEnabled(False)
         self.stop.setEnabled(False)
-        self.statusBar().showMessage("Stopping…")
+        self.logger.info("Stopping")
         if self.process.state() == QProcess.ProcessState.Running:
             self.cancel_started_process()
 
@@ -916,71 +1003,82 @@ class MainWindow(QMainWindow):
     def reset_session(self):
         self.preferences.session_path.unlink()
         self.reset_session_button.setEnabled(False)
-        self.statusBar().showMessage("Saved browser session cleared.")
+        self.logger.info("Saved browser session cleared")
 
     def process_error(self, _):
         if not self.stopping:
-            self.log.appendPlainText(self.process.errorString())
+            self.logger.error(self.process.errorString())
 
-    def show_work_status(self):
-        prefix = "Stopping — " if self.stopping else "Paused — " if self.paused else ""
-        metrics = "" if self.download_progress is None else " — " + self.download_progress.summary()
-        self.statusBar().showMessage(prefix + self.work_status + metrics)
+    def tail_log(self):
+        text = self.log_reader.read()
+        if text:
+            self.log.moveCursor(QTextCursor.MoveOperation.End)
+            self.log.insertPlainText(text)
+            self.log.moveCursor(QTextCursor.MoveOperation.End)
 
     def read_events(self):
         while self.process.canReadLine():
             event = json.loads(bytes(self.process.readLine()).decode())
+            if event["type"] in ("log", "manual"):
+                self.logger.info(event["message"])
             if self.stopping:
                 continue
-            if event["type"] in ("log", "manual"):
-                self.log.appendPlainText(event["message"])
             if event["type"] == "manual":
                 self.paused = True
                 self.pause.setEnabled(False)
                 self.start_indexing.setEnabled(True)
-                self.statusBar().showMessage("Waiting for you to click Scan Profile")
+                self.logger.info("Waiting for you to click Scan Profile")
             elif event["type"] == "session_saved":
-                self.log.appendPlainText(f"Browser session saved: {event['path']}")
-                self.statusBar().showMessage("Browser session saved.")
+                self.logger.info("Browser session saved: %s", event["path"])
             elif event["type"] == "scanned":
                 self.scanned_links = event["links"]
                 self.refresh_profile_scans()
             elif event["type"] == "indexing":
-                self.work_status = f"Indexed {event['total']} unique posts, {event['added']} new posts found"
-                self.log.appendPlainText(self.work_status)
-                self.show_work_status()
+                self.logger.info("Indexed %s unique posts, %s new posts found",
+                                 event["total"], event["added"])
             elif event["type"] == "downloading":
-                self.work_status = f"Downloading ({event['current']}/{event['total']})"
-                self.show_work_status()
+                self.logger.info("Downloading (%s/%s)", event["current"], event["total"])
             elif event["type"] == "transfer":
                 self.download_progress.downloaded_bytes += event["bytes"]
-                self.show_work_status()
+            elif event["type"] == "api_usage":
+                remaining = event["remaining"] if event["remaining"] is not None else "Not reported"
+                reset = (f"{event['reset_seconds']} seconds"
+                         if event["reset_seconds"] is not None else "Not reported")
+                self.api_usage.setPlainText(
+                    f"Requests remaining: {remaining}\nReset in: {reset}\nStatus: {event['message']}")
+                self.logger.info("TikWM API usage — remaining: %s; reset: %s; status: %s",
+                                 remaining, reset, event["message"])
+            elif event["type"] == "api_error":
+                self.auto_continuing = False
+                self.logger.error(
+                    f"TikWM API response for post {event['media_id']}\n"
+                    f"Request: {event['request_url']}\n"
+                    f"HTTP status: {event['status_code']}\n"
+                    f"Requests remaining: {event['remaining']}\n"
+                    f"Reset in: {event['reset_seconds']} seconds\n"
+                    f"Saved response: {event['response_path']}\n"
+                    f"{event['response_body']}")
             elif event["type"] == "progress":
                 if event["current"] == 0:
                     self.download_progress = DownloadProgress(event["total"])
                     if self.paused:
                         self.download_progress.pause()
-                    self.status_timer.start()
                 self.download_progress.completed = event["current"]
-                if event["current"] > 0:
-                    self.show_work_status()
                 self.progress.setRange(0, max(event["total"], 1))
                 self.progress.setValue(event["current"])
                 self.progress.setFormat(f"{event['current']} / {event['total']} posts")
             elif event["type"] == "done":
-                self.status_timer.stop()
-                self.completed = True
+                self.completed = not event.get("failed", False)
                 self.stopping = event["stopped"]
 
     def read_errors(self):
         text = self.stderr_decoder.decode(bytes(self.process.readAllStandardError()))
         if text:
-            self.log.appendPlainText(text)
+            self.logger.error(text.rstrip())
 
     def process_finished(self, code, status):
         self.read_events()
         self.read_errors()
-        self.status_timer.stop()
         self.set_busy(False)
         if self.stopping:
             self.auto_continuing = False
@@ -989,10 +1087,10 @@ class MainWindow(QMainWindow):
             if self.progress.maximum() == 0:
                 self.progress.setRange(0, 1)
                 self.progress.setValue(0)
-            self.statusBar().showMessage("Stopped")
+            self.logger.info("Stopped")
         elif code != 0 or status == QProcess.ExitStatus.CrashExit:
             self.auto_continuing = False
-            self.statusBar().showMessage(f"Process exited with code {code}; see traceback above")
+            self.logger.error("Process exited with code %s; see traceback above", code)
         elif self.completed:
             if self.scanning:
                 if self.auto_download.isChecked():
@@ -1001,12 +1099,13 @@ class MainWindow(QMainWindow):
                 if self.auto_continuing and self.select_next_unscanned_profile():
                     self.begin_indexing()
                     return
-                self.statusBar().showMessage(f"Scan complete — {len(self.scanned_links)} results. Click Download Profile.")
+                self.logger.info("Scan complete — %s results. Click Download Profile",
+                                 len(self.scanned_links))
             else:
                 if self.auto_continuing and self.select_next_unscanned_profile():
                     self.begin_indexing()
                     return
-                self.statusBar().showMessage("Completed")
+                self.logger.info("Completed")
             self.auto_continuing = False
             if self.settings.notifications and not self.stopping:
                 QApplication.alert(self)
@@ -1031,6 +1130,11 @@ class MainWindow(QMainWindow):
                 self.preferences.save_state(self.current_state())
             else:
                 self.preferences.save_config(remember_settings=False)
+            self.logger.info("Application closed")
+            self.log_timer.stop()
+            self.log_reader.close()
+            self.logger.removeHandler(self.log_handler)
+            self.log_handler.close()
             event.accept()
 
 

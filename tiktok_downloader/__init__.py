@@ -1,3 +1,3 @@
 """TikTok Downloader 2. Original application © 2024 Jettcodey."""
 
-__version__ = "3.4.4"
+__version__ = "3.4.5"

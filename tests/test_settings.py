@@ -126,7 +126,7 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     window = MainWindow(tmp_path)
     qtbot.addWidget(window)
     window.show()
-    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Downloader", "Settings"]
+    assert [window.tabs.tabText(i) for i in range(window.tabs.count())] == ["Downloader", "API", "Settings"]
     assert window.tabs.currentWidget() == window.download_tab
     assert not window.findChildren(QDialog)
     assert not window.findChildren(QMenuBar)
@@ -180,6 +180,37 @@ def test_settings_tab_save_paths_and_busy_state(qtbot, tmp_path):
     window.tabs.setCurrentWidget(window.settings_tab)
     assert window.browser.isEnabled()
     assert window.save_settings_button.isEnabled()
+
+
+def test_api_tab_settings_save_restart_and_reset(qtbot, tmp_path):
+    window = MainWindow(tmp_path)
+    qtbot.addWidget(window)
+    window.show()
+    window.tabs.setCurrentWidget(window.api_tab)
+    assert window.api_method.currentData() == "tikwm"
+    assert window.tikwm_api_group.isEnabled()
+    assert not window.tiktok_direct_group.isEnabled()
+    assert window.tikwm_api_key.echoMode() == window.tikwm_api_key.EchoMode.Password
+    assert window.tiktok_cookie.echoMode() == window.tiktok_cookie.EchoMode.Password
+    window.tikwm_api_key.setText("tikwm-key")
+    window.api_method.setCurrentIndex(window.api_method.findData("tiktok_direct"))
+    window.tiktok_device_id.setText("device-id")
+    window.tiktok_cookie.setText("sessionid=value")
+    assert not window.tikwm_api_group.isEnabled()
+    assert window.tiktok_direct_group.isEnabled()
+    window.save_config()
+
+    restored = MainWindow(tmp_path)
+    qtbot.addWidget(restored)
+    assert restored.api_method.currentData() == "tiktok_direct"
+    assert restored.tikwm_api_key.text() == "tikwm-key"
+    assert restored.tiktok_device_id.text() == "device-id"
+    assert restored.tiktok_cookie.text() == "sessionid=value"
+    restored.reset_defaults()
+    assert restored.api_method.currentData() == "tikwm"
+    assert restored.tikwm_api_key.text() == ""
+    assert restored.tiktok_device_id.text() == ""
+    assert restored.tiktok_cookie.text() == ""
 
 
 def test_browser_status_refreshes_from_disk(qtbot, tmp_path, monkeypatch):
@@ -236,4 +267,4 @@ def test_browser_install_process_refreshes_status(qtbot, tmp_path, monkeypatch, 
     assert window.browser_status.text() == "Browser installed"
     assert window.download.isEnabled()
     assert not window.reset_session_button.isEnabled()
-    assert window.statusBar().currentMessage() == "Browser installer exited with code 0"
+    assert "Browser installer exited with code 0" in window.preferences.log_path.read_text(encoding="utf-8")

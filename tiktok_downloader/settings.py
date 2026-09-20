@@ -22,10 +22,13 @@ class AppState(BaseModel):
 
 class AppConfig(AppState):
     remember_settings: bool = True
+    api_method: Literal["tikwm", "tiktok_direct"] = "tikwm"
+    tikwm_api_key: str = ""
+    tiktok_device_id: str = ""
+    tiktok_cookie: str = ""
     images_only: bool = False
     video_dir: str = "video"
     image_dir: str = "photo"
-    json_logs: bool = False
     download_logs: bool = False
     notifications: bool = False
     scroll_ms: int = 10000
@@ -41,6 +44,7 @@ class Settings:
         directory.mkdir(parents=True, exist_ok=True)
         self.config_path = directory / "config.json"
         self.state_path = directory / "state.json"
+        self.log_path = directory / "application.log"
         self.session_path = directory / "browser-session.json"
         self.scan_dir = directory / "scans"
         self.index_dir = directory / "indexes"
