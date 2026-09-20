@@ -28,14 +28,20 @@ def test_hd_mass_download(job_factory, server, video_dir, image_dir):
     assert transferred == sum(path.stat().st_size for path in root.rglob("*") if path.suffix in (".mp4", ".jpg"))
     indexing = [event for event in events if event["type"] == "indexing"]
     assert [(event["total"], event["added"]) for event in indexing] == [(1, 1), (2, 1)]
-    assert [event for event in events if event["type"] == "log"
-            and event["message"].startswith("Scan delay:")] == [
-        {"type": "log", "message": "Scan delay: 0.15 sec"},
-    ]
+    scan_settings = json.loads(next(event["message"] for event in events
+                                    if event["type"] == "log"
+                                    and event["message"].startswith("Scan settings: ")).split(": ", 1)[1])
+    assert scan_settings["source"] == "@alice"
+    assert scan_settings["scroll_ms"] == 150
+    assert scan_settings["browser"] == "chromium"
+    assert scan_settings["tikwm_api_key"] == "<not configured>"
+    assert scan_settings["tiktok_cookie"] == "<not configured>"
     assert all(set(event) == {"type", "total", "added"} for event in indexing)
     assert [event for event in events if event["type"] == "downloading"] == [
-        {"type": "downloading", "current": 1, "total": 2},
-        {"type": "downloading", "current": 2, "total": 2},
+        {"type": "downloading", "current": 1, "total": 2,
+         "url": server[0] + "/@alice/video/123"},
+        {"type": "downloading", "current": 2, "total": 2,
+         "url": server[0] + "/@alice/photo/456"},
     ]
     assert [event for event in events if event["type"] == "api_usage"][:2] == [
         {"type": "api_usage", "remaining": "4321", "reset_seconds": "3600", "message": "success"},
@@ -76,9 +82,18 @@ def test_tiktok_direct_downloads_highest_resolution_video_and_photos(job_factory
     assert (root / "Data" / "json" / "123_DIRECT.json").exists()
     assert (root / "Data" / "json" / "456_DIRECT.json").exists()
     assert server[1]["/api/hd"] == 0
+    assert server[1]["/api/item/detail/"] == 1
     assert server[1]["direct-cookie"] == 2
     assert not [event for event in events if event["type"] in ("api_usage", "api_error")]
     assert events[-1] == {"type": "done", "stopped": False}
+
+    settings = json.loads(next(event["message"] for event in events
+                               if event["type"] == "log"
+                               and event["message"].startswith("Download settings: ")).split(": ", 1)[1])
+    assert settings["api_method"] == "tiktok_direct"
+    assert settings["link_count"] == 2
+    assert settings["tiktok_cookie"] == "<configured>"
+    assert "direct-cookie" not in json.dumps(settings)
 
 
 def test_scan_continues_when_profile_navigates_after_dom_loaded(job_factory, server):

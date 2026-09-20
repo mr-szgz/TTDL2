@@ -1,5 +1,6 @@
 """Port of MainForm.cs workflows. Browser collection precedes HTTP downloads."""
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
 from pathlib import Path
 import re
 import threading
@@ -91,7 +92,6 @@ class Downloader:
         """MassDownloadByUsername: browser, manual Resume, scroll, saved links."""
         job = self.job
         username = profile_name(job.source)
-        self.log(f"Scan delay: {job.scroll_ms / 1000:g} sec")
         with sync_playwright() as playwright:
             options = {"headless": job.headless}
             executable = job.executable
@@ -223,6 +223,10 @@ class Downloader:
     def scan(self):
         job = self.job
         Path(job.folder).mkdir(parents=True, exist_ok=True)
+        settings = asdict(job)
+        settings["tikwm_api_key"] = "<configured>" if job.tikwm_api_key else "<not configured>"
+        settings["tiktok_cookie"] = "<configured>" if job.tiktok_cookie else "<not configured>"
+        self.log(f"Scan settings: {json.dumps(settings, sort_keys=True)}")
         links = self.collect_profile()
         if not self.control.stopped.is_set():
             self.emit({"type": "scanned", "links": links})
@@ -230,6 +234,12 @@ class Downloader:
         return links
 
     def run(self, links):
+        Path(self.job.folder).mkdir(parents=True, exist_ok=True)
+        settings = asdict(self.job)
+        settings["tikwm_api_key"] = "<configured>" if self.job.tikwm_api_key else "<not configured>"
+        settings["tiktok_cookie"] = "<configured>" if self.job.tiktok_cookie else "<not configured>"
+        settings["link_count"] = len(links)
+        self.log(f"Download settings: {json.dumps(settings, sort_keys=True)}")
         self.emit({"type": "progress", "current": 0, "total": len(links)})
         failed = False
         with requests.Session() as session, create_provider(self.job, self.emit, self.control) as provider:
@@ -238,7 +248,7 @@ class Downloader:
             for current, link in enumerate(links, 1):
                 if not self.control.checkpoint():
                     break
-                self.emit({"type": "downloading", "current": current, "total": len(links)})
+                self.emit({"type": "downloading", "current": current, "total": len(links), "url": link})
                 if not self.media(link, session):
                     failed = not self.control.stopped.is_set()
                     break

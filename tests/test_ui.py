@@ -279,19 +279,23 @@ def test_hd_mass_only_screen(window, qtbot):
     assert window.source.mapTo(window, window.source.rect().bottomLeft()).y() < window.profile_scans.mapTo(window, window.profile_scans.rect().topLeft()).y()
     assert window.profile_scans.geometry().top() == window.restore_scan_button.geometry().top()
     assert not window.restore_scan_button.isEnabled()
-    assert window.download_tab.findChildren(QCheckBox) == [window.auto_continue, window.checks["images_only"],
-                                                           window.checks["notifications"], window.auto_download,
-                                                           window.remember_settings]
+    assert set(window.download_tab.findChildren(QCheckBox)) == {
+        window.auto_continue, window.checks["images_only"], window.checks["notifications"],
+        window.auto_download, window.remember_settings,
+    }
     assert window.settings_tab.findChildren(QCheckBox) == [window.checks["download_logs"]]
     assert window.scan_delay.parentWidget().title() == "Scan Profiles"
-    assert window.auto_continue.parentWidget().title() == "Scan Profiles"
+    assert window.download_tab.isAncestorOf(window.auto_continue)
+    assert window.download_tab.isAncestorOf(window.auto_download)
     assert window.auto_continue.text() == "&Auto continue to next to scan"
     assert not window.auto_continue.isChecked()
-    assert window.scan_delay.geometry().bottom() < window.auto_continue.geometry().top()
     assert window.open_profile_downloads_button.text() == "Open profile downloads"
     assert window.auto_download.isChecked()
-    assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.progress.mapTo(window, window.progress.rect().topLeft()).y()
-    assert window.auto_download.mapTo(window, window.auto_download.rect().bottomLeft()).y() < window.download.mapTo(window, window.download.rect().topLeft()).y()
+    footer_controls = [window.remember_settings, window.auto_continue, window.auto_download,
+                       window.select_all_logs_button, window.copy_logs_button]
+    assert len({control.mapTo(window, control.rect().center()).y() for control in footer_controls}) == 1
+    assert [control.mapTo(window, control.rect().center()).x() for control in footer_controls] == sorted(
+        control.mapTo(window, control.rect().center()).x() for control in footer_controls)
     assert "Download activity" not in [label.text() for label in window.findChildren(QLabel)]
     assert window.download.text() == "&New Session"
     assert window.start_indexing.isVisible()

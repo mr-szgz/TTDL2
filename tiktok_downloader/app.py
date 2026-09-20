@@ -384,7 +384,6 @@ class MainWindow(QMainWindow):
         self.auto_continue.setObjectName("autoContinueToNextScan")
         self.auto_continue.setToolTip(
             "After each scan and any automatic downloads, scan the next profile without saved results")
-        profile_form.addRow("", self.auto_continue)
         download_group = QGroupBox("Downloads")
         download_form = QFormLayout(download_group)
         form.addRow(download_group)
@@ -411,7 +410,6 @@ class MainWindow(QMainWindow):
             options.addWidget(check)
         self.auto_download = QCheckBox("&Auto download after scans")
         self.auto_download.setChecked(True)
-        options.addWidget(self.auto_download)
         options.addStretch()
         download_form.addRow(options)
         open_folder = QPushButton("Open &Downloads")
@@ -490,6 +488,8 @@ class MainWindow(QMainWindow):
         self.remember_settings.setToolTip("Automatically save settings before quitting")
         self.remember_settings.toggled.connect(lambda checked: self.update_option("remember_settings", checked))
         log_actions.addWidget(self.remember_settings)
+        log_actions.addWidget(self.auto_continue)
+        log_actions.addWidget(self.auto_download)
         log_actions.addStretch()
         self.select_all_logs_button = QPushButton("Select all")
         self.select_all_logs_button.clicked.connect(self.log.selectAll)
@@ -1028,7 +1028,8 @@ class MainWindow(QMainWindow):
                 self.logger.info("Indexed %s unique posts, %s new posts found",
                                  event["total"], event["added"])
             elif event["type"] == "downloading":
-                self.logger.info("Downloading (%s/%s)", event["current"], event["total"])
+                self.logger.info("Downloading (%s/%s): %s",
+                                 event["current"], event["total"], event["url"])
             elif event["type"] == "transfer":
                 self.download_progress.downloaded_bytes += event["bytes"]
             elif event["type"] == "api_usage":

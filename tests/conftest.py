@@ -52,6 +52,15 @@ def server():
                 }})
             elif parsed.path == "/api/limit":
                 self.send_json({"code": -1, "msg": "Free Api Limit: 10000 request/ 1 day."})
+            elif parsed.path == "/api/item/detail/":
+                assert parse_qs(parsed.query)["itemId"] == ["456"]
+                self.send_json({"itemInfo": {"itemStruct": {
+                    "author": {"uniqueId": "alice"},
+                    "imagePost": {"images": [
+                        {"imageURL": {"urlList": [origin + "/media/1.jpg"]}},
+                        {"imageURL": {"urlList": [origin + "/media/2.jpg"]}},
+                    ]},
+                }}})
             elif parsed.path == "/@alice":
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html")
@@ -105,13 +114,14 @@ def server():
                     ]},
                 })
             elif parsed.path == "/@alice/photo/456":
-                self.send_tiktok_item({
-                    "author": {"uniqueId": "alice"},
-                    "imagePost": {"images": [
-                        {"imageURL": {"urlList": [origin + "/media/1.jpg"]}},
-                        {"imageURL": {"urlList": [origin + "/media/2.jpg"]}},
-                    ]},
-                })
+                body = b'''<!doctype html><html><body><script>
+                    fetch('/api/item/detail/?itemId=456');
+                    </script></body></html>'''
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
             elif parsed.path == "/media/missing.mp4":
                 self.send_response(404)
                 self.end_headers()

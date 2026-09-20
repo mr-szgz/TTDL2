@@ -4,7 +4,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 from time import monotonic
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright
 
@@ -133,10 +133,19 @@ class TikTokDirectProvider:
                 for name, value in (part.strip().split("=", 1)
                                     for part in self.job.tiktok_cookie.split(";") if part.strip())
             ])
-        self.page.goto(url, wait_until="domcontentloaded", timeout=120000)
-        raw = json.loads(self.page.locator(
-            "script#__UNIVERSAL_DATA_FOR_REHYDRATION__").text_content())
-        item = raw["__DEFAULT_SCOPE__"]["webapp.video-detail"]["itemInfo"]["itemStruct"]
+        if kind == "photo":
+            with self.page.expect_response(
+                    lambda response: urlsplit(response.url).path == "/api/item/detail/"
+                    and parse_qs(urlsplit(response.url).query).get("itemId") == [media_id],
+                    timeout=120000) as response_info:
+                self.page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            raw = response_info.value.json()
+            item = raw["itemInfo"]["itemStruct"]
+        else:
+            self.page.goto(url, wait_until="domcontentloaded", timeout=120000)
+            raw = json.loads(self.page.locator(
+                "script#__UNIVERSAL_DATA_FOR_REHYDRATION__").text_content())
+            item = raw["__DEFAULT_SCOPE__"]["webapp.video-detail"]["itemInfo"]["itemStruct"]
         username = item["author"]["uniqueId"]
         self._save_response(username, media_id, raw)
         session.headers.update({
