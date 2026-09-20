@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add a TikTok Direct download provider that reads TikTok's own post data, selects the highest-resolution no-watermark video variant, downloads photo posts, and reuses the saved browser session plus an optional cookie.
+
+### Changed
+
+- Route downloads through isolated TikWM and TikTok Direct providers selected by the API tab method combo box.
+- Remove the unused TikTok device ID setting; the direct provider does not require it.
+
 ## [3.4.6] - 2026-09-20
 
 ### Fixed

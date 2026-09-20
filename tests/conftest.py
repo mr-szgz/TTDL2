@@ -18,6 +18,9 @@ def server():
         def do_GET(self):
             parsed = urlsplit(self.path)
             counts[parsed.path] += 1
+            if (parsed.path.startswith("/@alice/")
+                    and "sessionid=direct-cookie" in self.headers.get("Cookie", "")):
+                counts["direct-cookie"] += 1
             origin = f"http://127.0.0.1:{self.server.server_port}"
             if parsed.path == "/api/standard":
                 media_id = parse_qs(parsed.query)["aweme_id"][0]
@@ -87,6 +90,28 @@ def server():
                 self.send_response(302)
                 self.send_header("Location", origin + "/@alice/video/123")
                 self.end_headers()
+            elif parsed.path == "/@alice/video/123":
+                self.send_tiktok_item({
+                    "author": {"uniqueId": "alice"},
+                    "video": {"bitrateInfo": [
+                        {"Bitrate": 400000, "PlayAddr": {
+                            "Width": 640, "Height": 360, "DataSize": "1000",
+                            "UrlList": [origin + "/media/low.mp4"],
+                        }},
+                        {"Bitrate": 2000000, "PlayAddr": {
+                            "Width": 1920, "Height": 1080, "DataSize": "5000",
+                            "UrlList": [origin + "/media/direct-hd.mp4"],
+                        }},
+                    ]},
+                })
+            elif parsed.path == "/@alice/photo/456":
+                self.send_tiktok_item({
+                    "author": {"uniqueId": "alice"},
+                    "imagePost": {"images": [
+                        {"imageURL": {"urlList": [origin + "/media/1.jpg"]}},
+                        {"imageURL": {"urlList": [origin + "/media/2.jpg"]}},
+                    ]},
+                })
             elif parsed.path == "/media/missing.mp4":
                 self.send_response(404)
                 self.end_headers()
@@ -112,6 +137,19 @@ def server():
             self.send_header("X-Limit-Request-Reset", "3600")
             self.end_headers()
             self.wfile.write(json.dumps(data).encode())
+
+        def send_tiktok_item(self, item):
+            raw = {"__DEFAULT_SCOPE__": {"webapp.video-detail": {
+                "itemInfo": {"itemStruct": item},
+            }}}
+            body = ("<!doctype html><html><body><script "
+                    "id=\"__UNIVERSAL_DATA_FOR_REHYDRATION__\" type=\"application/json\">"
+                    + json.dumps(raw) + "</script></body></html>").encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
     http = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=http.serve_forever, daemon=True)

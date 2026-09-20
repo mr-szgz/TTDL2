@@ -540,13 +540,6 @@ class MainWindow(QMainWindow):
         api_layout.addWidget(self.tikwm_api_group)
         self.tiktok_direct_group = QGroupBox("TikTok Direct")
         tiktok_direct_form = QFormLayout(self.tiktok_direct_group)
-        self.tiktok_device_id = QLineEdit(self.settings.tiktok_device_id)
-        self.tiktok_device_id.setObjectName("tiktokDeviceId")
-        self.tiktok_device_id.setAccessibleName("TikTok device ID")
-        self.tiktok_device_id.textChanged.connect(lambda value: self.update_option("tiktok_device_id", value))
-        tiktok_device_id_label = QLabel("&Device ID")
-        tiktok_device_id_label.setBuddy(self.tiktok_device_id)
-        tiktok_direct_form.addRow(tiktok_device_id_label, self.tiktok_device_id)
         self.tiktok_cookie = QLineEdit(self.settings.tiktok_cookie)
         self.tiktok_cookie.setObjectName("tiktokCookie")
         self.tiktok_cookie.setAccessibleName("TikTok cookie")
@@ -809,8 +802,7 @@ class MainWindow(QMainWindow):
     def update_option(self, name, checked):
         setattr(self.settings, name, checked)
         if self.scanned_job is not None and name not in {
-                "notifications", "remember_settings", "api_method", "tikwm_api_key",
-                "tiktok_device_id", "tiktok_cookie"}:
+                "notifications", "remember_settings"}:
             setattr(self.scanned_job, name, checked)
 
     def update_api_method(self):
@@ -835,7 +827,6 @@ class MainWindow(QMainWindow):
         self.executable.setText(self.settings.executable)
         self.api_method.setCurrentIndex(self.api_method.findData(self.settings.api_method))
         self.tikwm_api_key.setText(self.settings.tikwm_api_key)
-        self.tiktok_device_id.setText(self.settings.tiktok_device_id)
         self.tiktok_cookie.setText(self.settings.tiktok_cookie)
         self.update_api_method()
         self.video_dir.setText(self.settings.video_dir)
@@ -856,9 +847,7 @@ class MainWindow(QMainWindow):
         self.logger.info("Defaults restored; click Save Settings to keep these values")
 
     def start_download(self, checked=False):
-        settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username",
-                                                     "notifications", "remember_settings", "api_method",
-                                                     "tikwm_api_key", "tiktok_device_id", "tiktok_cookie"})
+        settings = self.job_settings()
         self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
                            new_session=True, **settings))
 
@@ -895,9 +884,7 @@ class MainWindow(QMainWindow):
         if path.exists():
             self.source.setText(f"https://www.tiktok.com/@{username.lstrip('@')}")
             self.scanned_links = read_links(path)
-            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username",
-                                                         "notifications", "remember_settings", "api_method",
-                                                         "tikwm_api_key", "tiktok_device_id", "tiktok_cookie"})
+            settings = self.job_settings()
             self.scanned_job = Job(source=self.source.text(), folder=self.destination.text(), **settings)
             self.download_progress = None
             self.paused = self.stopping = False
@@ -935,6 +922,12 @@ class MainWindow(QMainWindow):
         self.process.start()
         self.process.write((json.dumps({"job": asdict(job), "links": links}) + "\n").encode())
 
+    def job_settings(self):
+        return self.settings.model_dump(exclude={
+            "source", "folder", "window_geometry", "selected_username",
+            "notifications", "remember_settings",
+        })
+
     def set_busy(self, busy):
         self.start_indexing.setEnabled(not busy)
         self.scan_delay.setEnabled(not busy)
@@ -966,9 +959,7 @@ class MainWindow(QMainWindow):
     def begin_indexing(self):
         self.auto_continuing = self.auto_continue.isChecked()
         if self.process.state() == QProcess.ProcessState.NotRunning:
-            settings = self.settings.model_dump(exclude={"source", "folder", "window_geometry", "selected_username",
-                                                         "notifications", "remember_settings", "api_method",
-                                                         "tikwm_api_key", "tiktok_device_id", "tiktok_cookie"})
+            settings = self.job_settings()
             self.start_job(Job(source=self.source.text(), folder=self.destination.text(),
                                manual_start=False, **settings))
             return

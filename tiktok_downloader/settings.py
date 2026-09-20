@@ -24,7 +24,6 @@ class AppConfig(AppState):
     remember_settings: bool = True
     api_method: Literal["tikwm", "tiktok_direct"] = "tikwm"
     tikwm_api_key: str = ""
-    tiktok_device_id: str = ""
     tiktok_cookie: str = ""
     images_only: bool = False
     video_dir: str = "video"

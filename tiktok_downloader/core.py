@@ -1,6 +1,5 @@
 """Port of MainForm.cs workflows. Browser collection precedes HTTP downloads."""
 from dataclasses import dataclass
-import json
 from pathlib import Path
 import re
 import threading
@@ -8,6 +7,7 @@ from time import monotonic
 from urllib.parse import quote, unquote, urljoin, urlsplit
 import requests
 from playwright.sync_api import sync_playwright
+from .providers import create_provider
 from .settings import CONFIG_DIR
 
 @dataclass
@@ -25,6 +25,9 @@ class Job:
     scroll_ms: int = 10000
     site: str = "https://www.tiktok.com"
     hd_api: str = "https://www.tikwm.com/api/"
+    api_method: str = "tikwm"
+    tikwm_api_key: str = ""
+    tiktok_cookie: str = ""
     session_path: str = str(CONFIG_DIR / "browser-session.json")
     new_session: bool = False
     scan_dir: str = str(CONFIG_DIR / "scans")
@@ -77,7 +80,6 @@ def system_browser():
 class Downloader:
     def __init__(self, job, emit, control):
         self.job, self.emit, self.control = job, emit, control
-        self.metadata_ready_at = 0.0
 
     def log(self, message):
         self.emit({"type": "log", "message": message})
@@ -169,68 +171,27 @@ class Downloader:
         if kind == "video" and existing_video.exists():
             self.log(f"Already downloaded: {existing_video.name}")
             return True
-        # TikWM's free API permits one metadata request per second. Media transfers
-        # use that interval too; there is no delay between files in a photo set.
-        if self.control.stopped.wait(max(0, self.metadata_ready_at - monotonic())):
+        result = self.provider.resolve(url, username, kind, media_id, session)
+        if result is None:
             return False
-        if not self.control.checkpoint():
-            return False
-        with session.get(job.hd_api, params={"url": media_id, "hd": "1"}, timeout=120) as response:
-            response.raise_for_status()
-            response_body = response.text
-            raw = json.loads(response_body)
-            status_code = response.status_code
-            request_url = response.url
-            remaining = response.headers.get("X-Limit-Request-Remaining")
-            reset_seconds = response.headers.get("X-Limit-Request-Reset")
-            self.emit({
-                "type": "api_usage",
-                "remaining": remaining,
-                "reset_seconds": reset_seconds,
-                "message": raw["msg"],
-            })
-        self.metadata_ready_at = monotonic() + 1.0
+        username = result.username
         root = Path(job.folder) / filename_component(username)
-        json_dir = root / "Data" / "json"
-        json_dir.mkdir(parents=True, exist_ok=True)
-        response_path = json_dir / f"{media_id}_HD.json"
-        response_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
-        if raw["code"] != 0:
-            self.emit({
-                "type": "api_error",
-                "media_id": media_id,
-                "status_code": status_code,
-                "request_url": request_url,
-                "remaining": remaining,
-                "reset_seconds": reset_seconds,
-                "response": raw,
-                "response_body": response_body,
-                "response_path": str(response_path),
-            })
-            return False
-        data = raw["data"]
-        username = data["author"]["unique_id"]
-        if kind == "photo":
-            assets = [("photo", f"{media_id}_{i}.jpg", image, f"{media_id}_{i}.jpg")
-                      for i, image in enumerate(data["images"], 1)]
-        else:
-            assets = [("video", f"{media_id}_HD.mp4", data["hdplay"], f"{media_id}_HD")]
         index_dir = Path(job.index_dir)
         index_dir.mkdir(parents=True, exist_ok=True)
-        for category, name, asset_url, index_id in assets:
+        for asset in result.assets:
             if not self.control.checkpoint():
                 return False
-            if job.images_only and category == "video":
+            if job.images_only and asset.category == "video":
                 self.log(f"Skipped video {media_id} (images only)")
                 continue
-            destination = root / (job.image_dir if category == "photo" else job.video_dir) / name
+            destination = root / (job.image_dir if asset.category == "photo" else job.video_dir) / asset.name
             if destination.exists():
                 self.log(f"Already downloaded: {destination.name}")
                 continue
             destination.parent.mkdir(parents=True, exist_ok=True)
             self.log(f"Downloading {destination.name}")
             partial = destination.with_suffix(destination.suffix + ".part")
-            with session.get(asset_url, stream=True, timeout=120) as response:
+            with session.get(asset.url, stream=True, timeout=120) as response:
                 if response.status_code == 404:
                     self.log(f"Skipped unavailable media: {destination.name} (HTTP 404)")
                     continue
@@ -255,7 +216,7 @@ class Downloader:
                 return False
             partial.replace(destination)
             with (index_dir / f"{filename_component(username)}_index.txt").open("a", encoding="utf-8") as index:
-                index.write(index_id + "\n")
+                index.write(asset.index_id + "\n")
             self.log(f"Saved {destination}")
         return True
 
@@ -271,7 +232,8 @@ class Downloader:
     def run(self, links):
         self.emit({"type": "progress", "current": 0, "total": len(links)})
         failed = False
-        with requests.Session() as session:
+        with requests.Session() as session, create_provider(self.job, self.emit, self.control) as provider:
+            self.provider = provider
             session.headers.update({"User-Agent": "TikTokDownloader2/2.0", "Accept-Encoding": "identity"})
             for current, link in enumerate(links, 1):
                 if not self.control.checkpoint():

@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QDialog, QGroupBox, QMenuBar
 
 from tiktok_downloader.app import MainWindow
+from tiktok_downloader.core import Job
 from tiktok_downloader.settings import AppConfig, AppState, Settings
 
 
@@ -192,24 +193,26 @@ def test_api_tab_settings_save_restart_and_reset(qtbot, tmp_path):
     assert not window.tiktok_direct_group.isEnabled()
     assert window.tikwm_api_key.echoMode() == window.tikwm_api_key.EchoMode.Password
     assert window.tiktok_cookie.echoMode() == window.tiktok_cookie.EchoMode.Password
+    window.scanned_job = Job(source="@alice", folder=str(tmp_path))
     window.tikwm_api_key.setText("tikwm-key")
     window.api_method.setCurrentIndex(window.api_method.findData("tiktok_direct"))
-    window.tiktok_device_id.setText("device-id")
     window.tiktok_cookie.setText("sessionid=value")
     assert not window.tikwm_api_group.isEnabled()
     assert window.tiktok_direct_group.isEnabled()
+    assert window.job_settings()["api_method"] == "tiktok_direct"
+    assert window.job_settings()["tiktok_cookie"] == "sessionid=value"
+    assert window.scanned_job.api_method == "tiktok_direct"
+    assert window.scanned_job.tiktok_cookie == "sessionid=value"
     window.save_config()
 
     restored = MainWindow(tmp_path)
     qtbot.addWidget(restored)
     assert restored.api_method.currentData() == "tiktok_direct"
     assert restored.tikwm_api_key.text() == "tikwm-key"
-    assert restored.tiktok_device_id.text() == "device-id"
     assert restored.tiktok_cookie.text() == "sessionid=value"
     restored.reset_defaults()
     assert restored.api_method.currentData() == "tikwm"
     assert restored.tikwm_api_key.text() == ""
-    assert restored.tiktok_device_id.text() == ""
     assert restored.tiktok_cookie.text() == ""
 
 

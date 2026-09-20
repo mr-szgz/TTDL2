@@ -58,6 +58,29 @@ def test_images_only(job_factory):
     assert len(list(Path(job.folder).rglob("*.jpg"))) == 2
 
 
+def test_tiktok_direct_downloads_highest_resolution_video_and_photos(job_factory, server):
+    job = job_factory(api_method="tiktok_direct", tiktok_cookie="sessionid=direct-cookie")
+    events = []
+
+    Downloader(job, events.append, Control()).run([
+        server[0] + "/@alice/video/123",
+        server[0] + "/@alice/photo/456",
+    ])
+
+    root = Path(job.folder) / "alice"
+    assert (root / "video" / "123_HD.mp4").read_bytes() == b"fixture-media:/media/direct-hd.mp4"
+    assert not server[1]["/media/low.mp4"]
+    for index in (1, 2):
+        assert (root / "photo" / f"456_{index}.jpg").read_bytes() == \
+            f"fixture-media:/media/{index}.jpg".encode()
+    assert (root / "Data" / "json" / "123_DIRECT.json").exists()
+    assert (root / "Data" / "json" / "456_DIRECT.json").exists()
+    assert server[1]["/api/hd"] == 0
+    assert server[1]["direct-cookie"] == 2
+    assert not [event for event in events if event["type"] in ("api_usage", "api_error")]
+    assert events[-1] == {"type": "done", "stopped": False}
+
+
 def test_scan_continues_when_profile_navigates_after_dom_loaded(job_factory, server):
     job = job_factory(site=server[0] + "/navigating")
 
