@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import threading
 from time import monotonic
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 import requests
 from playwright.sync_api import sync_playwright
 from .settings import CONFIG_DIR
@@ -124,26 +124,26 @@ class Downloader:
                 self.log("Browser minimized. Indexing in the background — 0 results indexed.")
             indexed = {"video": [], "photo": []}
             total = 0
-            last_page = False
+            scrolled = False
             while self.control.checkpoint():
                 previous_total = total
                 for kind in ("video", "photo"):
-                    for link in page.locator(f'a[href*="/{kind}/"]').evaluate_all("nodes => nodes.map(n => n.href)"):
+                    for anchor in page.locator(f'a[href*="/{kind}/"]').all():
+                        link = urljoin(page.url, anchor.get_attribute("href"))
                         parsed = urlsplit(link)
                         if re.fullmatch(rf"/@{re.escape(username)}/{kind}/\d+/?", unquote(parsed.path)):
                             canonical = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
                             if canonical not in indexed[kind]:
                                 indexed[kind].append(canonical)
                 total = len(indexed["video"]) + len(indexed["photo"])
-                self.emit({"type": "indexing", "total": total, "added": total - previous_total})
-                if last_page:
+                if scrolled and total == previous_total:
                     break
-                height = page.evaluate("document.body.scrollHeight")
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                self.emit({"type": "indexing", "total": total, "added": total - previous_total})
+                page.keyboard.press("End")
+                scrolled = True
                 scroll_deadline = monotonic() + job.scroll_ms / 1000
                 while not self.control.stopped.is_set() and monotonic() < scroll_deadline:
                     page.wait_for_timeout(min(100, (scroll_deadline - monotonic()) * 1000))
-                last_page = height == page.evaluate("document.body.scrollHeight")
                 context.storage_state(path=job.session_path, indexed_db=True)
             links = indexed["video"] + indexed["photo"]
             context.storage_state(path=job.session_path, indexed_db=True)

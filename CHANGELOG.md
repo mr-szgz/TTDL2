@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.4.6] - 2026-09-20
+
+### Fixed
+
+- Keep profile scans running when TikTok replaces the page document during navigation instead of crashing on a destroyed Playwright execution context.
+
 ## [3.4.5] - 2026-09-20
 
 ### Added
@@ -157,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimize the browser while scanning after the user finishes login or CAPTCHA setup.
 - Use `ttdl2` as the Python package distribution and launcher name.
 
-[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.5...HEAD
+[Unreleased]: https://github.com/mr-szgz/ttdl2/compare/v3.4.6...HEAD
+[3.4.6]: https://github.com/mr-szgz/ttdl2/compare/v3.4.5...v3.4.6
 [3.4.5]: https://github.com/mr-szgz/ttdl2/compare/v3.4.4...v3.4.5
 [3.4.4]: https://github.com/mr-szgz/ttdl2/compare/v3.4.3...v3.4.4
 [3.4.3]: https://github.com/mr-szgz/ttdl2/compare/v3.4.2...v3.4.3

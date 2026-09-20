@@ -57,6 +57,18 @@ def test_images_only(job_factory):
     assert not list(Path(job.folder).rglob("*.mp4"))
     assert len(list(Path(job.folder).rglob("*.jpg"))) == 2
 
+
+def test_scan_continues_when_profile_navigates_after_dom_loaded(job_factory, server):
+    job = job_factory(site=server[0] + "/navigating")
+
+    links = Downloader(job, lambda _: None, Control()).scan()
+
+    assert links == [
+        server[0] + "/@alice/video/123",
+        server[0] + "/@alice/photo/456",
+    ]
+    assert server[1]["/navigating/@alice"] == 2
+
 def test_stop_during_download(job_factory):
     job = job_factory()
     control = Control()

@@ -65,6 +65,21 @@ def server():
                             document.body.append(a);
                         }
                     });</script></body></html>''')
+            elif parsed.path == "/navigating/@alice":
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                if parse_qs(parsed.query).get("stable") == ["1"]:
+                    self.wfile.write(b'''<!doctype html><html><body>
+                        <a href="/@alice/video/123">Video</a>
+                        <a href="/@alice/photo/456">Photo</a>
+                        </body></html>''')
+                else:
+                    self.wfile.write(b'''<!doctype html><html><body><script>
+                        document.addEventListener('DOMContentLoaded', () => {
+                            location.replace('/navigating/@alice?stable=1');
+                        });
+                        </script></body></html>''')
             elif parsed.path == "/indexing":
                 self.send_response(204)
                 self.end_headers()
